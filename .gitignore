@@ -176,3 +176,4 @@ cython_debug/
 # Later added
 *.zip
 .DS_Store
+*.pt
