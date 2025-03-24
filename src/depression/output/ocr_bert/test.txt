@@ -1,0 +1,4 @@
+Evaluation Metrics:
+Macro F1 Score: 0.5527
+Weighted F1 Score: 0.6236
+Hamming Loss: 0.1067

@@ -140,7 +140,7 @@ if __name__ == "__main__":
     BATCH_SIZE = 16
     NUM_EPOCHS = 10
     LEARNING_RATE = 5e-5
-    OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'output')
+    OUTPUT_DIR = os.path.join(os.path.dirname(__file__), 'output', 'ocr_bert')
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
