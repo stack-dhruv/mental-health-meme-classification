@@ -103,6 +103,7 @@ def train_and_evaluate(
         # Training phase
         model.train()
         train_loss = 0
+        all_train_preds, all_train_labels = [], []
         train_progress = tqdm(train_dataloader, desc=f"Training Epoch {epoch + 1}")
         for batch in train_progress:
             optimizer.zero_grad()
@@ -115,43 +116,65 @@ def train_and_evaluate(
             optimizer.step()
             scheduler.step()
             train_loss += loss.item()
+
+            # Collect predictions and labels for F1 calculation
+            preds = torch.sigmoid(outputs.logits).detach().cpu().numpy()  # Fixed here
+            all_train_preds.extend(preds)
+            all_train_labels.extend(labels.cpu().numpy())
+
             train_progress.set_postfix({"Loss": loss.item()})
         train_loss /= len(train_dataloader)
-        print(f"Training Loss: {train_loss:.4f}")
+
+        # Calculate training metrics
+        train_f1_macro = f1_score(all_train_labels, (np.array(all_train_preds) > 0.5).astype(int), average="macro")
+        train_f1_weighted = f1_score(all_train_labels, (np.array(all_train_preds) > 0.5).astype(int), average="weighted")
+        print(f"Training Loss: {train_loss:.4f}, Macro F1: {train_f1_macro:.4f}, Weighted F1: {train_f1_weighted:.4f}")
 
         # Validation phase
         model.eval()
-        val_f1, val_hamming = 0, 0
+        val_loss = 0
+        all_val_preds, all_val_labels = [], []
         val_progress = tqdm(val_dataloader, desc=f"Validating Epoch {epoch + 1}")
-        all_preds, all_labels = [], []
         with torch.no_grad():
             for batch in val_progress:
                 input_ids = batch["input_ids"].to(device)
                 attention_mask = batch["attention_mask"].to(device)
                 labels = batch["labels"].to(device)
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-                preds = torch.sigmoid(outputs.logits).cpu().numpy()
-                all_preds.extend(preds)
-                all_labels.extend(labels.cpu().numpy())
-        val_f1 = f1_score(all_labels, (np.array(all_preds) > 0.5).astype(int), average="micro")
-        val_hamming = hamming_loss(all_labels, (np.array(all_preds) > 0.5).astype(int))
-        print(f"Validation F1 Score: {val_f1:.4f}, Hamming Loss: {val_hamming:.4f}")
+                preds = torch.sigmoid(outputs.logits).detach().cpu().numpy()  # Fixed here
+                all_val_preds.extend(preds)
+                all_val_labels.extend(labels.cpu().numpy())
+
+        # Calculate validation metrics
+        val_f1_macro = f1_score(all_val_labels, (np.array(all_val_preds) > 0.5).astype(int), average="macro")
+        val_f1_weighted = f1_score(all_val_labels, (np.array(all_val_preds) > 0.5).astype(int), average="weighted")
+        val_hamming = hamming_loss(all_val_labels, (np.array(all_val_preds) > 0.5).astype(int))
+        print(f"Validation Macro F1: {val_f1_macro:.4f}, Weighted F1: {val_f1_weighted:.4f}, Hamming Loss: {val_hamming:.4f}")
 
         # Save logs for this epoch
-        logs.append({"epoch": epoch + 1, "train_loss": train_loss, "val_f1": val_f1, "val_hamming": val_hamming})
+        logs.append({
+            "epoch": epoch + 1,
+            "train_loss": train_loss,
+            "train_f1_macro": train_f1_macro,
+            "train_f1_weighted": train_f1_weighted,
+            "val_f1_macro": val_f1_macro,
+            "val_f1_weighted": val_f1_weighted,
+            "val_hamming": val_hamming,
+        })
 
         # Save the best model
-        if val_f1 > best_f1:
-            best_f1 = val_f1
+        if val_f1_macro > best_f1:
+            best_f1 = val_f1_macro
             torch.save(model.state_dict(), best_model_path)
             print(f"Best model saved at epoch {epoch + 1}")
 
-    # Save the last model
-    torch.save(model.state_dict(), last_model_path)
-    print(f"Last model saved at epoch {num_epochs}")
+        # Save the last model after every epoch
+        torch.save(model.state_dict(), last_model_path)
 
-    # Save logs to CSV
-    pd.DataFrame(logs).to_csv(log_file, index=False)
+        # Save logs to CSV after every epoch
+        pd.DataFrame(logs).to_csv(log_file, index=False)
+
+    print(f"Last model saved at epoch {num_epochs}")
     print(f"Training logs saved to {log_file}")
 
 # Main script to train the model
