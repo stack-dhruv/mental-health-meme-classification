@@ -1,0 +1,10 @@
+Metric,Value
+Accuracy,0.5537
+Macro F1,0.4746
+Weighted F1,0.5548
+Hamming Loss,0.4463
+
+class,precision,recall,f1-score,support
+Irritability,0.4643,0.3514,0.4,37
+Nervousness,0.6017,0.6698,0.6339,106
+Restlessness,0.4167,0.4783,0.4453,115

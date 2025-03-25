@@ -1,0 +1,25 @@
+Test Metrics for Anxiety Classification Model
+==========================================
+
+Accuracy: 0.5537
+Macro F1: 0.4746
+Weighted F1: 0.5548
+Hamming Loss: 0.4463
+
+Detailed Classification Report:
+-----------------------------
+
+                       precision    recall  f1-score   support
+
+  Difficulty Relaxing     0.7143    0.6373    0.6736       102
+      Excessive Worry     0.4685    0.5652    0.5123        92
+       Impending Doom     0.6506    0.5143    0.5745       105
+         Irritability     0.4643    0.3514    0.4000        37
+Lack of Worry Control     0.5730    0.5426    0.5574        94
+          Nervousness     0.6017    0.6698    0.6339       106
+         Restlessness     0.4167    0.4783    0.4453       115
+      Unknown Anxiety     0.0000    0.0000    0.0000         1
+
+             accuracy                         0.5537       652
+            macro avg     0.4861    0.4698    0.4746       652
+         weighted avg     0.5629    0.5537    0.5548       652
