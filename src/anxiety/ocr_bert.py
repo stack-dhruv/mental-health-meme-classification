@@ -521,43 +521,6 @@ def run_pipeline(train_file, test_file=None, val_split=0.1, batch_size=16, num_e
     logger.info(f"Validation Hamming Loss: {val_metrics['hamming_loss']:.4f}")
     logger.info(f"Validation Report:\n{val_metrics['report']}")
     
-    if test_data:
-        logger.info("Evaluating on test set for each epoch...")
-        # Evaluate for each epoch (using saved checkpoints)
-        for epoch in range(1, num_epochs + 1):
-            # Load model for this epoch (use last model from final epoch)
-            last_model_path = os.path.join(os.path.dirname(model_save_path), f"last_{os.path.basename(model_save_path)}")
-            if os.path.exists(last_model_path):
-                model.load_state_dict(torch.load(last_model_path))
-                
-                # Evaluate
-                test_metrics = evaluate_model(model, test_dataloader, device, label_encoder)
-                
-                # Store metrics for plotting
-                test_metrics_history['accuracy'].append(test_metrics['accuracy'])
-                test_metrics_history['macro_f1'].append(test_metrics['macro_f1'])
-                test_metrics_history['weighted_f1'].append(test_metrics['weighted_f1'])
-                test_metrics_history['hamming_loss'].append(test_metrics['hamming_loss'])
-                
-                logger.info(f"Epoch {epoch} Test Metrics:")
-                logger.info(f"  Accuracy: {test_metrics['accuracy']:.4f}")
-                logger.info(f"  Macro F1: {test_metrics['macro_f1']:.4f}")
-                logger.info(f"  Weighted F1: {test_metrics['weighted_f1']:.4f}")
-                logger.info(f"  Hamming Loss: {test_metrics['hamming_loss']:.4f}")
-        
-        # Plot test metrics history
-        plot_test_metrics(test_metrics_history)
-        
-        # Final evaluation with best model
-        model.load_state_dict(torch.load(model_save_path))
-        logger.info("\nFinal Test Evaluation (Best Model):")
-        test_metrics = evaluate_model(model, test_dataloader, device, label_encoder)
-        logger.info(f"Test Accuracy: {test_metrics['accuracy']:.4f}")
-        logger.info(f"Test Macro F1: {test_metrics['macro_f1']:.4f}")
-        logger.info(f"Test Weighted F1: {test_metrics['weighted_f1']:.4f}")
-        logger.info(f"Test Hamming Loss: {test_metrics['hamming_loss']:.4f}")
-        logger.info(f"Test Report:\n{test_metrics['report']}")
-    
     # Return the model, tokenizer, and label encoder for inference
     return model, tokenizer, label_encoder
 
@@ -566,16 +529,18 @@ if __name__ == "__main__":
     base_dir = "mental-health-meme-classification"
     
     train_file = os.path.join(base_dir, "dataset", "Anxiety_Data", "anxiety_train.json")
-    test_file = os.path.join(base_dir, "dataset", "Anxiety_Data", "anxiety_test.json")
     
     # Define model save path
     model_save_path = os.path.join(base_dir, "models", "anxiety", "best_anxiety_model.pt")
+    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
     
-    # Run the pipeline
+    # Run the pipeline for training only
     model, tokenizer, label_encoder = run_pipeline(
         train_file=train_file,
-        test_file=test_file,
+        test_file=None,  # No test file - testing is now in a separate script
         num_epochs=10,
         batch_size=16,
         model_save_path=model_save_path
     )
+    
+    logger.info(f"Training completed. Model saved to {model_save_path}")
