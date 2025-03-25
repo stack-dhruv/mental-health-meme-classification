@@ -198,6 +198,8 @@ The baseline implementation focuses on leveraging **OCR text** extracted from me
 
   - Compared to the paper's reported metrics (**Macro F1 Score**: `62.99%`, **Weighted F1 Score**: `63.06%`), the model's performance is lower, highlighting the need for further optimization to match or exceed the baseline results.
 
+  - Additionally, we have included two extra classes, **Irritability** and **Unknown Anxiety**, which were not present in the paper. This may have contributed to the differences in performance metrics.
+
 - A training loss vs. epochs graph is available for visualization:  
   ![Training Loss vs Epochs](src/anxiety/output/ocr_bert/output.png)
 
