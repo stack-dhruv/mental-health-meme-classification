@@ -6,6 +6,10 @@ from sklearn.metrics import f1_score, hamming_loss
 from torch.utils.data import DataLoader
 from transformers import BertTokenizer
 
+# to prevent import error in the testing script
+# export PYTHONPATH=path/to/mental-health-meme-classification
+# python src/depression/testing/ocr_bert_test.py
+
 import sys
 import os
 
