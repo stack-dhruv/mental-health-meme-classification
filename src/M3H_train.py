@@ -9,9 +9,9 @@ from torch.utils.data import Dataset, DataLoader
 from transformers import (
     BartForSequenceClassification,
     BartTokenizer,
-    get_linear_schedule_with_warmup,
-    AdamW
+    get_linear_schedule_with_warmup
 )
+from torch.optim import AdamW
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, f1_score, classification_report, hamming_loss
 from sklearn.preprocessing import LabelEncoder
@@ -22,6 +22,7 @@ from tqdm import tqdm
 import logging
 import re
 from typing import List, Dict, Tuple, Optional
+import argparse
 
 # Configure logging
 logging.basicConfig(
@@ -58,28 +59,47 @@ def set_seed(seed=42):
 
 # Data loading and preprocessing functions
 def load_data(file_path):
-    """Load data from JSON file similar to existing implementation"""
+    """Load data from JSON file for both anxiety and depression datasets"""
     with open(file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
     
+    # Detect dataset type based on file path
+    is_anxiety = "Anxiety_Data" in file_path
+    
     # Filter out samples without required fields
     filtered_data = []
+    
     for sample in data:
-        if 'sample_id' in sample and 'ocr_text' in sample and 'meme_anxiety_category' in sample:
+        # Anxiety dataset processing
+        if is_anxiety and 'sample_id' in sample and 'ocr_text' in sample and 'meme_anxiety_category' in sample:
             # Fix the misspelled "Irritatbily" to "Irritability"
             if sample['meme_anxiety_category'] == 'Irritatbily':
                 sample['meme_anxiety_category'] = 'Irritability'
             # Change "Unknown" to "Unknown Anxiety"
             elif sample['meme_anxiety_category'] == 'Unknown':
                 sample['meme_anxiety_category'] = 'Unknown Anxiety'
-                
+            
             # Add empty triples if not present
             if 'triples' not in sample:
                 sample['triples'] = ""
-                
+            
+            filtered_data.append(sample)
+        
+        # Depression dataset processing
+        elif not is_anxiety and 'ocr_text' in sample and 'labels' in sample:
+            # Convert depression dataset format to match anxiety format
+            # This assumes depression uses multilabel format in 'labels'
+            # Adapt as needed based on actual depression data structure
+            sample['meme_anxiety_category'] = sample['labels'][0] if sample['labels'] else "Unknown"
+            
+            # Add empty triples if not present
+            if 'triples' not in sample:
+                sample['triples'] = ""
+            
             filtered_data.append(sample)
     
     return filtered_data
+
 
 def clean_triples(triples_text):
     """Clean and extract structured information from triples text"""
@@ -709,20 +729,46 @@ def run_pipeline(train_file, test_file=None, val_split=0.1, batch_size=8, num_ep
     return model, tokenizer, label_encoder
 
 if __name__ == "__main__":
-    base_dir = os.path.join("mental-health-meme-classification")
     
-    train_file = os.path.join(base_dir, "dataset", "Anxiety_Data", "anxiety_train.json")
+    # Add command line argument parsing
+    parser = argparse.ArgumentParser(description='Train mental health meme classification model')
+    parser.add_argument('--dataset', type=str, default='anxiety', choices=['anxiety', 'depression'],
+                        help='Dataset to use: anxiety or depression')
+    parser.add_argument('--epochs', type=int, default=NUM_EPOCHS,
+                        help='Number of epochs to train')
+    parser.add_argument('--batch-size', type=int, default=BATCH_SIZE,
+                        help='Batch size for training')
+    parser.add_argument('--use-test', action='store_true',
+                        help='Use the test file for final evaluation')
+    
+    args = parser.parse_args()
+    
+    # Get the absolute path to the project root directory
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    
+    # Set file paths based on dataset type
+    if args.dataset == "anxiety":
+        train_file = os.path.join(project_root, "dataset", "Anxiety_Data", "anxiety_train.json")
+        test_file = os.path.join(project_root, "dataset", "Anxiety_Data", "anxiety_test.json") if args.use_test else None
+        output_subdir = "anxiety"
+    else:  # depression
+        train_file = os.path.join(project_root, "dataset", "Depressive_Data", "train.json")
+        test_file = os.path.join(project_root, "dataset", "Depressive_Data", "test.json") if args.use_test else None
+        output_subdir = "depression"
+    
+    # Update output directory to use absolute paths
+    OUTPUT_DIR = os.path.join(project_root, "src", output_subdir, "output", "knowledge_fusion")
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     # Define model save path
     model_save_path = os.path.join(OUTPUT_DIR, "best_model.pt")
-    os.makedirs(os.path.dirname(model_save_path), exist_ok=True)
     
-    # Run the pipeline 
+    # Actually run the training pipeline
     model, tokenizer, label_encoder = run_pipeline(
         train_file=train_file,
-        test_file=None,  # No test file - we'll use a train-validation split
-        num_epochs=NUM_EPOCHS,
-        batch_size=BATCH_SIZE
+        test_file=test_file,
+        num_epochs=args.epochs,
+        batch_size=args.batch_size
     )
     
     logger.info(f"Training completed. Model saved to {model_save_path}")
