@@ -1,0 +1,19 @@
+Accuracy: 0.5709
+Macro F1: 0.5679
+Weighted F1: 0.5711
+Hamming Loss: 0.4291
+
+Classification Report:
+                       precision    recall  f1-score   support
+
+  Difficulty Relaxing     0.7143    0.7317    0.7229        41
+      Excessive Worry     0.4444    0.5405    0.4878        37
+       Impending Doom     0.7250    0.6905    0.7073        42
+         Irritability     0.7500    0.4000    0.5217        15
+Lack of Worry Control     0.6000    0.6316    0.6154        38
+          Nervousness     0.4651    0.4762    0.4706        42
+         Restlessness     0.4651    0.4348    0.4494        46
+
+             accuracy                         0.5709       261
+            macro avg     0.5949    0.5579    0.5679       261
+         weighted avg     0.5792    0.5709    0.5711       261

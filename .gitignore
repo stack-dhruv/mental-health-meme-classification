@@ -181,3 +181,6 @@ cython_debug/
 
 # Ignoring the folders that are not needed for the project
 M3H
+
+# Ignoring  label_encoder.pkl files
+*.pkl
