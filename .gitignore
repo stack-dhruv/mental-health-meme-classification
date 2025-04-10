@@ -177,3 +177,7 @@ cython_debug/
 *.zip
 .DS_Store
 *.pt
+
+
+# Ignoring the folders that are not needed for the project
+M3H
