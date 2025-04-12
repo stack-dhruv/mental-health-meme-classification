@@ -1,0 +1,10 @@
+--- Evaluation Metrics (validation_best) ---
+Accuracy: 0.0000
+Macro F1: 0.0000
+Weighted F1: 0.0000
+Hamming Loss: 1.0000
+Micro F1: 0.0000
+Samples F1: 0.0000
+
+--- Classification Report ---
+Error during metric calculation: Samplewise metrics are not available outside of multilabel classification.

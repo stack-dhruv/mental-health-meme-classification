@@ -1,0 +1,24 @@
+--- Evaluation Metrics (validation_best) ---
+Accuracy: 0.6814
+Hamming Loss: 0.0740
+Micro F1: 0.7135
+Macro F1: 0.7049
+Weighted F1: 0.7148
+Samples F1: 0.7128
+
+--- Classification Report ---
+                       precision    recall  f1-score   support
+
+Concentration Problem     0.7288    0.7167    0.7227        60
+      Eating Disorder     0.8077    0.7577    0.7819       194
+         Feeling Down     0.6064    0.7260    0.6608       208
+       Lack of Energy     0.8750    0.5833    0.7000        12
+     Lack of Interest     0.7381    0.6596    0.6966        47
+      Low Self-Esteem     0.6267    0.5465    0.5839        86
+            Self-Harm     0.8116    0.7089    0.7568       158
+    Sleeping Disorder     0.7568    0.7179    0.7368       156
+
+            micro avg     0.7214    0.7058    0.7135       921
+            macro avg     0.7439    0.6771    0.7049       921
+         weighted avg     0.7296    0.7058    0.7148       921
+          samples avg     0.7181    0.7156    0.7128       921
