@@ -1,0 +1,33 @@
+Multilabel Confusion Matrix (per label):
+
+Label: Concentration Problem
+[[787  35]
+ [ 26  34]]
+
+Label: Eating Disorder
+[[618  70]
+ [ 43 151]]
+
+Label: Feeling Down
+[[630  44]
+ [102 106]]
+
+Label: Lack of Energy
+[[867   3]
+ [  7   5]]
+
+Label: Lack of Interest
+[[811  24]
+ [ 19  28]]
+
+Label: Low Self-Esteem
+[[763  33]
+ [ 43  43]]
+
+Label: Self-Harm
+[[677  47]
+ [ 50 108]]
+
+Label: Sleeping Disorder
+[[698  28]
+ [ 62  94]]
