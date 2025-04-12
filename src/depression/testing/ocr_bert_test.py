@@ -17,7 +17,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.append(BASE_DIR)
 
-from src.depression.ocr_bert import DepressionDataset, DepressionClassifier
+from depression.training.ocr_bert import DepressionDataset, DepressionClassifier
 
 def evaluate_model(model_path, test_data_path, categories, max_len, batch_size, device):
     """

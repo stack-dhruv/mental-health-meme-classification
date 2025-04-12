@@ -10,7 +10,7 @@ import logging
 from tqdm import tqdm
 
 # Import the necessary functions from the main file
-from ocr_bert import (
+from anxiety.training.ocr_bert import (
     AnxietyClassifier, AnxietyDataset, evaluate_model, load_data, set_seed, MAX_LEN
 )
 
