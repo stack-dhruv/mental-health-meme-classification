@@ -208,3 +208,146 @@ The baseline implementation focuses on leveraging **OCR text** extracted from me
 
 - A Validatioin Hamming Loss vs. epochs graph is available for visualization:  
   ![Validatioin Hamming Loss vs Epochs](src/anxiety/output/ocr_bert/output_2.png)
+
+## Advanced Implementation: HyCore_M3Net
+
+### Model Architecture
+
+HyCore_M3Net (Hybrid Core Multimodal Mental Health Network) is a novel multimodal architecture specifically designed for mental health meme classification. The model combines:
+
+1. **Visual-Linguistic Fusion (LXMERT)**: Processes image region features and OCR text extracted from memes
+2. **Mental Health Reasoning (MentalBART)**: Processes textual reasoning and knowledge retrieval
+3. **Retrieval-Augmented Generation (RAG)**: Enhances reasoning by retrieving similar examples
+4. **Cross-Modal Fusion**: Combines multimodal representations for final classification
+
+The architecture follows this flow:
+- **OCR Text** → LXMERT Text Encoder
+- **Region Features** → LXMERT Visual Encoder
+- **Reasoning + RAG Context** → MentalBART Encoder
+- The outputs from both encoders are fused and passed through an MLP classifier
+
+![HyCore_M3Net Architecture Diagram](src/shared/architecture_diagram.png)
+
+### Dependencies
+
+To run HyCore_M3Net, you'll need the following dependencies:
+
+```bash
+# Basic Libraries
+pip install numpy pandas matplotlib tqdm
+
+# Deep Learning 
+pip install torch torchvision
+
+# Hugging Face Transformers and Models
+pip install transformers==4.35.0 sentence-transformers==2.2.2
+
+# Retrieval Components
+pip install faiss-gpu  # Use faiss-cpu for CPU-only environments
+
+# Data Processing and Evaluation
+pip install scikit-learn
+```
+pip install --no-cache-dir \
+    torch==2.1.2 \
+    transformers==4.38.2 \
+    accelerate==0.28.0 \
+    sentence-transformers==2.7.0 \
+    faiss-cpu==1.8.0 \
+    scikit-learn==1.3.2 \
+    pandas==2.1.4 \
+    numpy==1.26.3 \
+    matplotlib==3.8.2 \
+    tqdm==4.66.2 \
+    Pillow==10.2.0
+
+
+
+### Running the Model
+
+To run the HyCore_M3Net model from the terminal:
+
+```bash
+# Navigate to the project directory
+cd mental-health-meme-classification
+
+# Run for depression (multi-label) task
+python src/shared/HyCore_M3Net.py
+
+# To run for anxiety (single-label) task, edit the script
+# Change line ~1187 from:
+# dataset = 'depression'
+# To:
+# dataset = 'anxiety'
+# Then run:
+python src/shared/HyCore_M3Net.py
+```
+
+### Configuration Options
+
+The model contains several configurable parameters:
+
+- `MAX_LEN_LXMERT`: Maximum token length for OCR text (default: 80)
+- `MAX_LEN_BART`: Maximum token length for reasoning text (default: 512)
+- `BATCH_SIZE`: Batch size for training (default: 8)
+- `NUM_EPOCHS`: Number of training epochs (default: 10)
+- `LEARNING_RATE`: Learning rate (default: 2e-5)
+- `NUM_ENSEMBLE_MODELS`: Number of models for ensemble (default: 3)
+- `RETRIEVAL_K`: Number of similar examples to retrieve for RAG (default: 3)
+
+These can be modified in the script to optimize performance based on your computational resources.
+
+### Expected Output
+
+The model produces:
+- Trained model checkpoints (best and last for each ensemble member)
+- Training logs with metrics
+- Classification reports for validation and test sets
+- Visualization of training history
+
+
+
+### Region-Level Visual Features
+
+HyCore_M3Net leverages region-level visual information rather than just global image features. The model uses Detectron2 (with Faster R-CNN) to extract these region features:
+
+#### Visual Feature Extraction Process
+
+1. **Object/Region Detection**: Detectron2 identifies salient areas within each meme image
+2. **Feature Extraction**: Extracts vector representations (embeddings) for each detected region
+3. **Bounding Box Calculation**: Records the location and size of each detected region
+
+#### Feature Format (.pt files)
+
+The extracted features are stored in PyTorch (.pt) files as dictionaries with the following structure:
+
+```python
+region_features = {
+    "image_id_1": {
+        "features": torch.tensor(...),  # Shape: (num_boxes, 2048)
+        "boxes": torch.tensor(...)      # Shape: (num_boxes, 4) - normalized coordinates
+    },
+    "image_id_2": {
+        # Same structure for each image
+    },
+    # ... more images
+}
+```
+
+Each image entry contains:
+
+- **Region Features (`features`)**: 
+  - A tensor containing visual embeddings for each detected region
+  - Shape: `(num_boxes, feature_dimension)`
+  - Where `num_boxes` is the number of regions detected (typically 36-100)
+  - And `feature_dimension` is 2048 for LXMERT compatibility
+
+- **Bounding Box Coordinates (`boxes`)**:
+  - A tensor containing the coordinates of each region's bounding box
+  - Shape: `(num_boxes, 4)`
+  - Coordinates are normalized to [0,1] range: `[x_min/W, y_min/H, x_max/W, y_max/H]`
+  - This enables the cross-modal attention to link text mentions to specific visual areas
+
+This region-level approach allows the model to perform fine-grained visual reasoning about specific elements in memes, rather than just considering the image as a whole, significantly improving performance for mental health classification tasks.
+
+
