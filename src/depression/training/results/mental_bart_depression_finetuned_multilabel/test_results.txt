@@ -1,0 +1,16 @@
+Test Loss: 0.3536
+Test Subset Accuracy: 0.4904
+Test F1 Macro: 0.5822
+Test F1 Weighted: 0.6597
+Test Precision Macro: 0.7358
+Test Recall Macro: 0.4994
+
+Per-Class Metrics:
+Concentration Problem: Precision=1.0000, Recall=0.6667, F1=0.8000, Support=66.0
+Eating Disorder: Precision=0.8684, Recall=0.7174, F1=0.7857, Support=92.0
+Feeling Down: Precision=0.8050, Recall=0.5872, F1=0.6790, Support=218.0
+Lack of Energy: Precision=0.0000, Recall=0.0000, F1=0.0000, Support=0.0
+Lack of Interest: Precision=0.8800, Recall=0.3099, F1=0.4583, Support=71.0
+Low Self-Esteem: Precision=0.7400, Recall=0.3246, F1=0.4512, Support=114.0
+Self-Harm: Precision=0.7576, Recall=0.6173, F1=0.6803, Support=81.0
+Sleeping Disorder: Precision=0.8356, Recall=0.7722, F1=0.8026, Support=79.0

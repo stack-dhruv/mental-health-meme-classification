@@ -1,0 +1,33 @@
+ -> New best model saved with Macro F1: 0.5087 in 'mental_bart_depression_finetuned_multilabel'
+
+Classification Report (Best Epoch):
+  Concentration Problem: Precision=0.8000, Recall=0.4762, F1=0.5970, Support=42.0
+  Eating Disorder: Precision=0.8810, Recall=0.7551, F1=0.8132, Support=49.0
+  Feeling Down: Precision=0.7805, Recall=0.4923, F1=0.6038, Support=195.0
+  Lack of Energy: Precision=1.0000, Recall=0.0185, F1=0.0364, Support=54.0
+  Lack of Interest: Precision=1.0000, Recall=0.2222, F1=0.3636, Support=45.0
+  Low Self-Esteem: Precision=0.5238, Recall=0.2588, F1=0.3465, Support=85.0
+  Self-Harm: Precision=0.6538, Recall=0.5574, F1=0.6018, Support=61.0
+  Sleeping Disorder: Precision=0.6481, Recall=0.7778, F1=0.7071, Support=45.0
+
+  Macro avg: Precision=0.7859, Recall=0.4448, F1=0.5087
+  Weighted avg: F1=0.5190
+
+--- Evaluating Best Model on Test Set ---
+You passed along `num_labels=3` with an incompatible id to label map: {'0': 'LABEL_0', '1': 'LABEL_1', '2': 'LABEL_2', '3': 'LABEL_3', '4': 'LABEL_4', '5': 'LABEL_5', '6': 'LABEL_6', '7': 'LABEL_7'}. The number of labels will be overwritten to 8.
+
+Test Set Results:
+  Test Loss: 0.3536
+  Test Subset Accuracy: 0.4904
+  Test F1 Macro: 0.5822
+  Test F1 Weighted: 0.6597
+  Test Precision Macro: 0.7358
+  Test Recall Macro: 0.4994
+
+Plotting training history...
+Training history plot saved to /media/nas_mount/avinash_ocr/Dhruvkumar_Patel_MT24032/others/mental-health-meme-classification/depressive_embeddings_output/training_history_multilabel_depression.png
+
+Analyzing class-wise performance...
+Class performance plot saved to mental_bart_depression_finetuned_multilabel/class_performance_plot.png
+
+Saving probability distributions for threshold optimization...
