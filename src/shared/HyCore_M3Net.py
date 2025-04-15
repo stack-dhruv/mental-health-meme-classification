@@ -81,14 +81,14 @@ REGION_FEATURES_DIR = os.path.join(MODELS_DIR, "region_visual_features")
 # Training Settings
 MAX_LEN_LXMERT = 80      # Max sequence length for LXMERT text input (OCR) - typically shorter
 MAX_LEN_BART = 512     # Max sequence length for MentalBART input (Reasoning + RAG)
-BATCH_SIZE = 8         # START SMALL - This model is memory intensive
+BATCH_SIZE = 16         # START SMALL - This model is memory intensive
 NUM_EPOCHS = 10         # Epochs per ensemble member
 LEARNING_RATE = 2e-5   # Common for fine-tuning transformers
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
 ADAM_EPSILON = 1e-8
 WEIGHT_DECAY = 0.01
-DROPOUT_PROB = 0.3
+DROPOUT_PROB = 0.1
 
 # RAG Settings
 RETRIEVAL_K = 3          # Number of examples to retrieve

@@ -67,7 +67,7 @@ VISUAL_FEATURES_DIR = os.path.join(MODELS_DIR, "visual_features")
 # Training Settings
 MAX_LEN_BART = 512  # Max sequence length for MentalBART input (Reasoning + RAG)
 BATCH_SIZE = 16  # Updated batch size
-NUM_EPOCHS = 10  # Epochs per run (adjust as needed)
+NUM_EPOCHS = 10  # Epochs per run (adjust as needed)F
 LEARNING_RATE = 5e-5  # Updated learning rate
 ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
@@ -416,14 +416,14 @@ def train_epoch(model, data_loader, optimizer, device, scheduler, loss_fn, grad_
     logger.info(f"Average Training Loss: {avg_loss:.4f}")
     return avg_loss
 
-def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multilabel):
+def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multilabel, split_name="Evaluation"):
     model.eval()
     total_loss = 0
     all_preds = []
     all_labels = []
 
     with torch.no_grad():
-        progress_bar = tqdm(data_loader, desc="Evaluating", leave=False)
+        progress_bar = tqdm(data_loader, desc=f"{split_name}", leave=False)
         for batch in progress_bar:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
@@ -444,7 +444,7 @@ def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multil
                 all_labels.extend(labels.cpu().numpy())
 
     avg_loss = total_loss / len(data_loader)
-    logger.info(f"Average Validation Loss: {avg_loss:.4f}")
+    logger.info(f"Average {split_name} Loss: {avg_loss:.4f}")
 
     if is_multilabel:
         accuracy = accuracy_score(all_labels, all_preds)
@@ -454,12 +454,12 @@ def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multil
         hamming = hamming_loss(all_labels, all_preds)
         report = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, zero_division=0)
 
-        logger.info(f"Validation Accuracy (Subset): {accuracy:.4f}")
-        logger.info(f"Validation F1 Micro: {f1_micro:.4f}")
-        logger.info(f"Validation F1 Macro: {f1_macro:.4f}")
-        logger.info(f"Validation F1 Weighted: {f1_weighted:.4f}")
-        logger.info(f"Validation Hamming Loss: {hamming:.4f}")
-        logger.info(f"Validation Classification Report:\n{report}")
+        logger.info(f"{split_name} Accuracy (Subset): {accuracy:.4f}")
+        logger.info(f"{split_name} F1 Micro: {f1_micro:.4f}")
+        logger.info(f"{split_name} F1 Macro: {f1_macro:.4f}")
+        logger.info(f"{split_name} F1 Weighted: {f1_weighted:.4f}")
+        logger.info(f"{split_name} Hamming Loss: {hamming:.4f}")
+        logger.info(f"{split_name} Classification Report:\n{report}")
         return {'loss': avg_loss, 'accuracy': accuracy, 'f1_micro': f1_micro, 'f1_macro': f1_macro, 'f1_weighted': f1_weighted, 'hamming': hamming, 'report': report}
 
     else:
@@ -469,11 +469,11 @@ def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multil
         f1_weighted = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
         report = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, zero_division=0)
 
-        logger.info(f"Validation Accuracy: {accuracy:.4f}")
-        logger.info(f"Validation F1 Micro: {f1_micro:.4f}")
-        logger.info(f"Validation F1 Macro: {f1_macro:.4f}")
-        logger.info(f"Validation F1 Weighted: {f1_weighted:.4f}")
-        logger.info(f"Validation Classification Report:\n{report}")
+        logger.info(f"{split_name} Accuracy: {accuracy:.4f}")
+        logger.info(f"{split_name} F1 Micro: {f1_micro:.4f}")
+        logger.info(f"{split_name} F1 Macro: {f1_macro:.4f}")
+        logger.info(f"{split_name} F1 Weighted: {f1_weighted:.4f}")
+        logger.info(f"{split_name} Classification Report:\n{report}")
         return {'loss': avg_loss, 'accuracy': accuracy, 'f1_micro': f1_micro, 'f1_macro': f1_macro, 'f1_weighted': f1_weighted, 'report': report}
 
 # --- Main Pipeline Function ---
@@ -493,31 +493,32 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
 
     is_multilabel = dataset_type == 'depression'
     train_data = []
-    val_data = []
+    eval_data = []
+    eval_split_name = "Validation" # Default name for evaluation split
 
     if dataset_type == 'depression':
         depression_cleaned_dir = cleaned_data_base.format(data_type="Depressive_Data")
         train_file = os.path.join(depression_cleaned_dir, "depressive_train_combined_preprocessed.json")
-        val_file = os.path.join(depression_cleaned_dir, "depressive_val_combined_preprocessed.json")
+        # Use the validation set for evaluation during training for depression
+        eval_file = os.path.join(depression_cleaned_dir, "depressive_val_combined_preprocessed.json")
+        # eval_split_name remains "Validation"
 
         logger.info(f"Loading Depression training data from: {train_file}")
         train_data = load_qwen_data(train_file)
-        logger.info(f"Loading Depression validation data from: {val_file}")
-        val_data = load_qwen_data(val_file)
+        logger.info(f"Loading Depression {eval_split_name} data from: {eval_file}")
+        eval_data = load_qwen_data(eval_file)
 
         if not train_data:
              logger.error("No depression training data loaded. Exiting.")
              return
-        if not val_data:
-             logger.warning("No depression validation data loaded. Proceeding without validation.")
-             if train_data:
-                 logger.info("Creating validation split from training data as validation file was empty/not found.")
-                 train_data, val_data = train_test_split(train_data, test_size=0.15, random_state=seed, stratify=[d['stratify_label'] for d in train_data])
+        if not eval_data:
+             logger.warning(f"No depression {eval_split_name} data loaded. Proceeding without evaluation during training.")
+             # Optionally handle this case, e.g., skip evaluation or use a train split
 
     elif dataset_type == 'anxiety':
         anxiety_cleaned_dir = cleaned_data_base.format(data_type="Anxiety_Data")
         train_file = os.path.join(anxiety_cleaned_dir, "anxiety_train_combined_preprocessed.json")
-        test_file = os.path.join(anxiety_cleaned_dir, "anxiety_test_combined_preprocessed.json")
+        # eval_split_name remains "Validation"
 
         logger.info(f"Loading Anxiety training data from: {train_file}")
         train_data_full = load_qwen_data(train_file)
@@ -526,36 +527,45 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
              logger.error("No anxiety training data loaded. Exiting.")
              return
 
-        logger.info("Splitting loaded anxiety training data into train/validation sets (85/15 split).")
+        logger.info(f"Splitting loaded anxiety training data into train/{eval_split_name} sets (85/15 split).")
         try:
-            train_data, val_data = train_test_split(train_data_full, test_size=0.15, random_state=seed, stratify=[d['stratify_label'] for d in train_data_full])
+            # Split into train_data and eval_data (which is the validation set here)
+            train_data, eval_data = train_test_split(train_data_full, test_size=0.15, random_state=seed, stratify=[d['stratify_label'] for d in train_data_full])
         except KeyError:
             logger.warning("Stratify label not found for anxiety split, using random split.")
-            train_data, val_data = train_test_split(train_data_full, test_size=0.15, random_state=seed)
+            train_data, eval_data = train_test_split(train_data_full, test_size=0.15, random_state=seed)
+        except ValueError as ve:
+             logger.warning(f"Stratification failed for anxiety split (likely too few samples per class): {ve}. Using random split.")
+             train_data, eval_data = train_test_split(train_data_full, test_size=0.15, random_state=seed)
+
 
     else:
         logger.error(f"Invalid dataset type: {dataset_type}")
         return
 
-    if not train_data or not val_data:
-        logger.error("Data loading/splitting resulted in empty train or validation set. Exiting.")
+    if not train_data: # Check train_data specifically
+        logger.error("Data loading/splitting resulted in empty train set. Exiting.")
         return
+    if not eval_data: # Check eval_data specifically
+        logger.warning(f"Data loading/splitting resulted in empty {eval_split_name} set. Evaluation will be skipped.")
 
-    logger.info(f"Final Data Split - Train: {len(train_data)}, Validation: {len(val_data)}")
 
+    logger.info(f"Final Data Split - Train: {len(train_data)}, {eval_split_name}: {len(eval_data)}")
+
+    # Fit label encoder ONLY on training data
     if is_multilabel:
         all_train_labels = [lbl for item in train_data for lbl in item['original_labels']]
         unique_labels = sorted(list(set(all_train_labels)))
         label_encoder = MultiLabelBinarizer(classes=unique_labels)
-        label_encoder.fit([item['original_labels'] for item in train_data])
+        label_encoder.fit([item['original_labels'] for item in train_data]) # Fit only on train
         num_labels = len(label_encoder.classes_)
-        logger.info(f"Multi-label classification. Found {num_labels} unique labels: {label_encoder.classes_}")
+        logger.info(f"Multi-label classification. Found {num_labels} unique labels from training data: {label_encoder.classes_}")
     else:
         label_encoder = LabelEncoder()
         train_labels = [item['original_labels'] for item in train_data]
-        label_encoder.fit(train_labels)
+        label_encoder.fit(train_labels) # Fit only on train
         num_labels = len(label_encoder.classes_)
-        logger.info(f"Single-label classification. Found {num_labels} unique labels: {label_encoder.classes_}")
+        logger.info(f"Single-label classification. Found {num_labels} unique labels from training data: {label_encoder.classes_}")
 
     logger.info(f"Loading tokenizer: {MENTALBART_MODEL_NAME}")
     tokenizer = BartTokenizer.from_pretrained(MENTALBART_MODEL_NAME)
@@ -563,11 +573,13 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
     rag_embedding_model = SentenceTransformer(RAG_EMBEDDING_MODEL, device=device)
     check_cuda_memory("After loading models")
 
+    # RAG corpus should ideally be built from a larger knowledge base,
+    # but here we use the training data text as the corpus for simplicity.
     rag_corpus = [f"OCR: {item.get('ocr_text', '')}\nReasoning: {item.get('qwen_reasoning', '')}".strip()
                   for item in train_data]
     rag_corpus = [doc if doc else "No text available." for doc in rag_corpus]
 
-    logger.info("Building RAG index...")
+    logger.info("Building RAG index (using training data as corpus)...")
     rag_index = build_rag_index(rag_corpus, rag_embedding_model, RAG_EMBEDDING_BATCH_SIZE, device)
     check_cuda_memory("After building RAG index")
 
@@ -575,13 +587,22 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
     train_dataset = MentalRAGFusionDataset(
         train_data, tokenizer, MAX_LEN_BART, rag_index, rag_embedding_model, rag_corpus, RETRIEVAL_K, device, label_encoder, is_multilabel
     )
-    val_dataset = MentalRAGFusionDataset(
-        val_data, tokenizer, MAX_LEN_BART, rag_index, rag_embedding_model, rag_corpus, RETRIEVAL_K, device, label_encoder, is_multilabel
-    )
+    # Create eval_dataset only if eval_data is not empty
+    eval_dataset = None
+    if eval_data:
+        eval_dataset = MentalRAGFusionDataset(
+            eval_data, tokenizer, MAX_LEN_BART, rag_index, rag_embedding_model, rag_corpus, RETRIEVAL_K, device, label_encoder, is_multilabel
+        )
 
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
-    logger.info(f"Train loader: {len(train_loader)} batches. Val loader: {len(val_loader)} batches.")
+    # Create eval_loader only if eval_dataset exists
+    eval_loader = None
+    if eval_dataset:
+        eval_loader = DataLoader(eval_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+        logger.info(f"Train loader: {len(train_loader)} batches. {eval_split_name} loader: {len(eval_loader)} batches.")
+    else:
+         logger.info(f"Train loader: {len(train_loader)} batches. No {eval_split_name} loader created.")
+
     check_cuda_memory("After creating dataloaders")
 
     model = MentalRAGFusionModel(
@@ -603,6 +624,7 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
     )
 
     total_steps = len(train_loader) * NUM_EPOCHS
+    # Using a constant LR scheduler as per previous setup, adjust if needed
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 1.0)
     logger.info("Using constant learning rate scheduler.")
 
@@ -614,8 +636,9 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
         logger.info("Using CrossEntropyLoss for single-label task.")
 
     logger.info("Starting training...")
-    best_val_metric = -1
-    history = {'train_loss': [], 'val_loss': [], 'val_metrics': []}
+    best_eval_metric = -1 # Use a more general name
+    # Renamed history keys for clarity
+    history = {'train_loss': [], f'{eval_split_name.lower()}_loss': [], f'{eval_split_name.lower()}_metrics': []}
 
     for epoch in range(NUM_EPOCHS):
         epoch_start_time = time.time()
@@ -625,21 +648,38 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
         train_loss = train_epoch(model, train_loader, optimizer, device, scheduler, loss_fn, GRADIENT_CLIPPING_THRESHOLD, is_multilabel)
         check_cuda_memory(f"Epoch {epoch+1} After Train")
 
-        val_metrics = evaluate_model(model, val_loader, device, loss_fn, label_encoder, is_multilabel)
-        check_cuda_memory(f"Epoch {epoch+1} After Eval")
+        # Perform evaluation only if eval_loader exists
+        eval_metrics = None
+        current_eval_loss = None # Track eval loss separately
+        if eval_loader:
+            eval_metrics = evaluate_model(model, eval_loader, device, loss_fn, label_encoder, is_multilabel, eval_split_name)
+            check_cuda_memory(f"Epoch {epoch+1} After Eval")
+            current_eval_loss = eval_metrics['loss']
+            history[f'{eval_split_name.lower()}_metrics'].append(eval_metrics)
+        else:
+            # Append placeholders if no evaluation was done
+            history[f'{eval_split_name.lower()}_metrics'].append(None)
+            logger.info(f"Skipping evaluation for Epoch {epoch+1} as {eval_split_name} data is not available.")
 
         history['train_loss'].append(train_loss)
-        history['val_loss'].append(val_metrics['loss'])
-        history['val_metrics'].append(val_metrics)
+        history[f'{eval_split_name.lower()}_loss'].append(current_eval_loss) # Append eval loss (or None)
 
-        current_metric = val_metrics.get('f1_macro', val_metrics.get('accuracy', -1))
+
+        # Determine the current metric for comparison, only if evaluation happened
+        current_metric = -1
+        if eval_metrics:
+             # Prioritize f1_macro, then accuracy for model saving comparison
+             current_metric = eval_metrics.get('f1_macro', eval_metrics.get('accuracy', -1))
 
         epoch_duration = time.time() - epoch_start_time
         logger.info(f"Epoch {epoch+1} completed in {epoch_duration:.2f} seconds.")
 
-        if current_metric > best_val_metric:
-            best_val_metric = current_metric
-            logger.info(f"New best validation metric ({'f1_macro' if 'f1_macro' in val_metrics else 'accuracy'}): {best_val_metric:.4f}. Saving model...")
+        # Save model based on evaluation metric, only if evaluation happened
+        if eval_metrics and current_metric > best_eval_metric:
+            best_eval_metric = current_metric
+            # Determine which metric was used for saving
+            metric_name_for_saving = 'f1_macro' if 'f1_macro' in eval_metrics else 'accuracy'
+            logger.info(f"New best {eval_split_name} metric ({metric_name_for_saving}): {best_eval_metric:.4f}. Saving model...")
             model_save_path = os.path.join(output_dir, f"best_model_seed_{seed}.pt")
             torch.save(model.state_dict(), model_save_path)
             logger.info(f"Model saved to {model_save_path}")
@@ -654,8 +694,10 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
             torch.cuda.empty_cache()
 
     logger.info("Training finished.")
+    # ... rest of the function (history saving, final logging) ...
     history_save_path = os.path.join(output_dir, f"training_history_seed_{seed}.json")
     try:
+        # Attempt to serialize history, handling potential non-serializable items
         serializable_history = json.loads(json.dumps(history, default=lambda x: x.tolist() if isinstance(x, np.ndarray) else str(x)))
         with open(history_save_path, 'w') as f:
             json.dump(serializable_history, f, indent=4)
@@ -663,8 +705,10 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
     except Exception as e:
         logger.error(f"Could not serialize or save training history: {e}")
 
+
     run_end_time = time.time()
     logger.info(f"Pipeline run for seed {seed} completed in {(run_end_time - run_start_time)/60:.2f} minutes.")
+
 
 # --- Execution ---
 if __name__ == "__main__":
