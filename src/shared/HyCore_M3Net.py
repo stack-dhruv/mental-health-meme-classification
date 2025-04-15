@@ -2,6 +2,7 @@
 
 import json
 import os
+os.environ["CUDA_VISIBLE_DEVICES"]="1"
 import random
 import numpy as np
 import pandas as pd
@@ -17,9 +18,9 @@ from transformers import (
     LxmertModel, # Base LXMERT model
     LxmertConfig, # To get hidden size if needed
     # General HF utilities
-    get_linear_schedule_with_warmup,
-    AdamW
+    get_linear_schedule_with_warmup
 )
+from torch.optim import AdamW
 # Sentence Transformer for RAG
 from sentence_transformers import SentenceTransformer
 # FAISS for RAG Index
@@ -58,14 +59,20 @@ logger = logging.getLogger("HybridMemePipeline")
 
 # Model Identifiers
 LXMERT_MODEL_NAME = "unc-nlp/lxmert-base-uncased" # Standard LXMERT
-MENTALBART_MODEL_NAME = "mental/mental-bart-base-cased" # MentalBART
+# MENTALBART_MODEL_NAME = "mental/mental-bart-base-cased" # MentalBART
+MENTALBART_MODEL_NAME = 'Tianlin668/MentalBART'
 RAG_EMBEDDING_MODEL = "BAAI/bge-m3" # Sentence Transformer for RAG
 
+script_dir = os.path.dirname(__file__)
+project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+print(project_root)
+DATASET_DIR = os.path.join(project_root, "dataset")
+MODELS_DIR = os.path.join(project_root, "models")
 # Paths (Relative to this script in 'shared' folder)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # Should be the 'shared' directory
-SRC_DIR = os.path.dirname(BASE_DIR) # Get the 'src' directory
-DATASET_DIR = os.path.join(SRC_DIR, "../dataset") # Go up one level from src to project root, then dataset
-MODELS_DIR = os.path.join(SRC_DIR, "../models")   # Go up one level from src to project root, then models
+SRC_DIR = os.path.abspath(os.path.join(script_dir, "..")) # Get the 'src' directory
+# DATASET_DIR = os.path.join(SRC_DIR, "../dataset") # Go up one level from src to project root, then dataset
+# MODELS_DIR = os.path.join(SRC_DIR, "../models")   # Go up one level from src to project root, then models
 # OUTPUT_DIR_BASE will be set dynamically in the pipeline function
 
 ANXIETY_DATA_DIR = os.path.join(DATASET_DIR, "Anxiety_Data")
@@ -82,7 +89,7 @@ ADAM_BETA1 = 0.9
 ADAM_BETA2 = 0.999
 ADAM_EPSILON = 1e-8
 WEIGHT_DECAY = 0.01
-DROPOUT_PROB = 0.1
+DROPOUT_PROB = 0.3
 
 # RAG Settings
 RETRIEVAL_K = 3          # Number of examples to retrieve
@@ -1240,16 +1247,16 @@ def run_hybrid_ensemble_pipeline(
                  logger.info("Generating RAG query embeddings and context...")
                  rag_prompt_constructor = PromptConstructorRAG(train_data, label_encoder)
                  temp_embed_gen = EmbeddingGeneratorRAG(model_name=RAG_EMBEDDING_MODEL, device=device) # Temp generator for queries
-                 for split_data, split_name in [(val_data, "Val"), (test_data, "Test")]:
-                     if not split_data: continue
+                 for split_data_, split_name in [(val_data, "Val"), (test_data, "Test")]:
+                     if not split_data_: continue
                      logger.info(f"Processing {split_name} for RAG context...")
-                     split_ocr = [s['ocr_text'] for s in split_data]
-                     split_figurative = [s['qwen_reasoning'] for s in split_data]  # Using figurative reasoning 
+                     split_ocr = [s['ocr_text'] for s in split_data_]
+                     split_figurative = [s['qwen_reasoning'] for s in split_data_]  # Using figurative reasoning 
                      query_embeddings = temp_embed_gen.generate_fused_embeddings(split_ocr, split_figurative)
                      if query_embeddings is not None:
                          retrieved_indices_batch = rag_retriever.retrieve_similar(query_embeddings)
                          if retrieved_indices_batch is not None:
-                             for i, sample in enumerate(tqdm(split_data, desc=f"Formatting {split_name} RAG")):
+                             for i, sample in enumerate(tqdm(split_data_, desc=f"Formatting {split_name} RAG")):
                                  sample_id = sample['id']
                                  # Exclude self-retrieval (won't happen here as queries are from val/test)
                                  valid_indices = retrieved_indices_batch[i][:RETRIEVAL_K].tolist()
@@ -1377,7 +1384,7 @@ if __name__ == "__main__":
     set_seed(BASE_SEED)
 
     # Default to depression dataset since that's what the user provided examples for
-    dataset = 'depression' 
+    dataset = 'anxiety' 
     
     try:
         run_hybrid_ensemble_pipeline(dataset_type=dataset)
