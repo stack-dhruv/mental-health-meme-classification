@@ -27,8 +27,7 @@ from sentence_transformers import SentenceTransformer
 import faiss
 # General utilities
 import matplotlib.pyplot as plt
-from tqdm.notebook import tqdm # Use notebook version if running in notebook
-# from tqdm import tqdm # Use standard if running as script
+from tqdm import tqdm # Use standard if running as script
 import logging
 import re
 from typing import List, Dict, Tuple, Optional, Any
@@ -1232,13 +1231,64 @@ def run_hybrid_ensemble_pipeline(
     logger.info("--- Step 4: Setting up RAG ---")
     rag_embeddings = None; rag_retriever = None; rag_context_map = {}
     try:
-        logger.info("Generating RAG DB embeddings (Train OCR + Figurative Reasoning)...")
-        rag_embed_generator = EmbeddingGeneratorRAG(model_name=RAG_EMBEDDING_MODEL, device=device)
-        train_ocr = [s['ocr_text'] for s in train_data]
-        train_figurative = [s['qwen_reasoning'] for s in train_data]  # Using the figurative reasoning
-        rag_embeddings = rag_embed_generator.generate_fused_embeddings(train_ocr, train_figurative)
-        del rag_embed_generator; gc.collect(); torch.cuda.empty_cache()
+        # Define embedding file path
+        rag_embed_file = os.path.join(pipeline_output_dir, f"{dataset_type}_rag_embeddings.pt")
+        logger.info(f"RAG embedding file path: {rag_embed_file}")
 
+        # Check if embeddings file already exists
+        if os.path.exists(rag_embed_file):
+            logger.info(f"Attempting to load pre-computed RAG embeddings from {rag_embed_file}")
+            try:
+                loaded_data = torch.load(rag_embed_file, map_location='cpu')
+                # Check if loaded data is a tensor or numpy array
+                if isinstance(loaded_data, torch.Tensor):
+                    rag_embeddings = loaded_data.numpy() # Convert to numpy for FAISS
+                elif isinstance(loaded_data, np.ndarray):
+                    rag_embeddings = loaded_data
+                else:
+                    logger.warning(f"Loaded RAG embeddings file contains unexpected type: {type(loaded_data)}. Regenerating.")
+                    rag_embeddings = None # Force regeneration
+
+                if rag_embeddings is not None:
+                    logger.info(f"Loaded RAG embeddings with shape: {rag_embeddings.shape}")
+
+            except Exception as e:
+                logger.error(f"Failed to load pre-computed RAG embeddings from {rag_embed_file}: {e}", exc_info=True)
+                rag_embeddings = None # Reset to None so we regenerate
+
+        # Generate embeddings if not loaded from file
+        if rag_embeddings is None:
+            logger.info("Generating new RAG DB embeddings (Train OCR + Figurative Reasoning)...")
+            rag_embed_generator = EmbeddingGeneratorRAG(model_name=RAG_EMBEDDING_MODEL, device=device)
+            train_ocr = [s['ocr_text'] for s in train_data]
+            train_figurative = [s['qwen_reasoning'] for s in train_data] # Using the figurative reasoning
+            rag_embeddings = rag_embed_generator.generate_fused_embeddings(train_ocr, train_figurative)
+
+            # Save embeddings for future use if generation was successful
+            if rag_embeddings is not None:
+                logger.info(f"Saving generated RAG embeddings to {rag_embed_file}")
+                try:
+                    # Ensure saving as a Tensor for consistency and potential efficiency
+                    if isinstance(rag_embeddings, np.ndarray):
+                        rag_embeddings_tensor = torch.from_numpy(rag_embeddings)
+                    elif isinstance(rag_embeddings, torch.Tensor):
+                         rag_embeddings_tensor = rag_embeddings # Already a tensor
+                    else:
+                         logger.error(f"Generated embeddings are of unexpected type {type(rag_embeddings)}. Cannot save.")
+                         rag_embeddings_tensor = None # Prevent saving
+
+                    if rag_embeddings_tensor is not None:
+                        torch.save(rag_embeddings_tensor, rag_embed_file)
+                        logger.info(f"RAG embeddings saved successfully.")
+
+                except Exception as e:
+                    logger.error(f"Failed to save RAG embeddings to {rag_embed_file}: {e}", exc_info=True)
+                    # Continue even if saving fails, but log the error
+
+            # Clean up generator immediately after use
+            del rag_embed_generator; gc.collect(); torch.cuda.empty_cache()
+
+        # Proceed with RAG index building and context generation if embeddings are available
         if rag_embeddings is not None:
             logger.info("Building RAG FAISS index...")
             rag_retriever = RAGRetrieverFAISS(rag_embeddings, top_k=RETRIEVAL_K)
@@ -1246,12 +1296,13 @@ def run_hybrid_ensemble_pipeline(
                  # Generate RAG context for Val and Test sets
                  logger.info("Generating RAG query embeddings and context...")
                  rag_prompt_constructor = PromptConstructorRAG(train_data, label_encoder)
-                 temp_embed_gen = EmbeddingGeneratorRAG(model_name=RAG_EMBEDDING_MODEL, device=device) # Temp generator for queries
+                 # Use a temporary generator for query embeddings to manage memory
+                 temp_embed_gen = EmbeddingGeneratorRAG(model_name=RAG_EMBEDDING_MODEL, device=device)
                  for split_data_, split_name in [(val_data, "Val"), (test_data, "Test")]:
                      if not split_data_: continue
                      logger.info(f"Processing {split_name} for RAG context...")
                      split_ocr = [s['ocr_text'] for s in split_data_]
-                     split_figurative = [s['qwen_reasoning'] for s in split_data_]  # Using figurative reasoning 
+                     split_figurative = [s['qwen_reasoning'] for s in split_data_] # Using figurative reasoning
                      query_embeddings = temp_embed_gen.generate_fused_embeddings(split_ocr, split_figurative)
                      if query_embeddings is not None:
                          retrieved_indices_batch = rag_retriever.retrieve_similar(query_embeddings)
@@ -1259,18 +1310,21 @@ def run_hybrid_ensemble_pipeline(
                              for i, sample in enumerate(tqdm(split_data_, desc=f"Formatting {split_name} RAG")):
                                  sample_id = sample['id']
                                  # Exclude self-retrieval (won't happen here as queries are from val/test)
-                                 valid_indices = retrieved_indices_batch[i][:RETRIEVAL_K].tolist()
+                                 # Ensure indices are valid before accessing train_data
+                                 valid_indices = [idx for idx in retrieved_indices_batch[i][:RETRIEVAL_K] if 0 <= idx < len(train_data)]
                                  rag_context_map[sample_id] = rag_prompt_constructor.format_rag_examples(sample_id, valid_indices)
-                         del query_embeddings, retrieved_indices_batch
-                 del temp_embed_gen; gc.collect(); torch.cuda.empty_cache()
+                         del query_embeddings, retrieved_indices_batch; gc.collect(); torch.cuda.empty_cache()
+                 del temp_embed_gen; gc.collect(); torch.cuda.empty_cache() # Clean up temp generator
                  logger.info(f"Generated RAG context for {len(rag_context_map)} samples.")
             else: logger.warning("RAG index build failed. RAG disabled.")
-        else: logger.warning("RAG embedding generation failed. RAG disabled.")
+        else: logger.warning("RAG embeddings not available (failed load/generation). RAG disabled.")
 
     except Exception as e: logger.error(f"Error during RAG setup: {e}", exc_info=True); logger.warning("Proceeding without RAG.")
     finally: # Ensure cleanup even on error
-        del rag_embeddings, rag_retriever # Keep rag_context_map
+        # Keep rag_context_map, clear embeddings/retriever which might be large
+        del rag_embeddings, rag_retriever
         if 'rag_embed_generator' in locals(): del rag_embed_generator
+        if 'temp_embed_gen' in locals(): del temp_embed_gen
         gc.collect(); torch.cuda.empty_cache()
 
 
