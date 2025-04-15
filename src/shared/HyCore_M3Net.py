@@ -113,6 +113,74 @@ def set_seed(seed):
     # torch.backends.cudnn.benchmark = False   # Optional
     logger.info(f"Seed set to {seed}")
 
+# --- Custom Collate Function ---
+def custom_collate_fn(batch):
+    """
+    Custom collate function to handle variable-sized visual features and positions.
+    This handles the "Trying to resize storage that is not resizable" error during batching.
+    """
+    elem = batch[0]
+    batch_dict = {key: [] for key in elem}
+    
+    # Collect all items by key
+    for b in batch:
+        for key in elem:
+            batch_dict[key].append(b[key])
+    
+    # Special handling for visual features and positions
+    max_boxes = max([feat.size(0) for feat in batch_dict['visual_feats']])
+    feat_dim = batch_dict['visual_feats'][0].size(1)
+    
+    # Create padded batches for visual features
+    padded_feats = []
+    padded_pos = []
+    padded_vis_mask = []
+    
+    for i in range(len(batch)):
+        feat = batch_dict['visual_feats'][i]
+        pos = batch_dict['visual_pos'][i]
+        num_boxes = feat.size(0)
+        
+        # Pad features if needed
+        if num_boxes < max_boxes:
+            padding = torch.zeros(max_boxes - num_boxes, feat_dim, dtype=feat.dtype, device=feat.device)
+            padded_feat = torch.cat([feat, padding], dim=0)
+            
+            # Pad positions (4-dimensional coordinates)
+            pos_padding = torch.zeros(max_boxes - num_boxes, 4, dtype=pos.dtype, device=pos.device)
+            padded_position = torch.cat([pos, pos_padding], dim=0)
+            
+            # Create mask with 1s for real boxes, 0s for padding
+            mask = torch.cat([
+                batch_dict['vis_attention_mask'][i], 
+                torch.zeros(max_boxes - num_boxes, dtype=torch.long)
+            ])
+        else:
+            padded_feat = feat
+            padded_position = pos
+            mask = batch_dict['vis_attention_mask'][i]
+        
+        padded_feats.append(padded_feat)
+        padded_pos.append(padded_position)
+        padded_vis_mask.append(mask)
+    
+    # Stack the padded tensors
+    batch_dict['visual_feats'] = torch.stack(padded_feats)
+    batch_dict['visual_pos'] = torch.stack(padded_pos)
+    batch_dict['vis_attention_mask'] = torch.stack(padded_vis_mask)
+    
+    # Handle other tensors normally
+    result = {}
+    for key in batch_dict:
+        if key in ['visual_feats', 'visual_pos', 'vis_attention_mask']:
+            # Already processed
+            result[key] = batch_dict[key]
+        else:
+            # Use default PyTorch stacking
+            result[key] = torch.stack(batch_dict[key]) if torch.is_tensor(batch_dict[key][0]) else batch_dict[key]
+    
+    return result
+
 # --- Data Loading Function ---
 def load_qwen_data(file_path: str) -> List[Dict]:
     """Loads data from JSON containing combined figurative reasoning results."""
@@ -857,292 +925,211 @@ def split_data(data, val_size=0.15, test_size=0.15, random_state=42):
         )
         return train, val, []
 
-# --- Evaluation Function (Ensemble - Adapted) ---
+# --- Ensemble Evaluation Function ---
 def evaluate_ensemble(
     model_paths: List[str],
-    dataloader: DataLoader,
+    data_loader: DataLoader,
     device: torch.device,
     label_encoder: LabelEncoder,
     is_multilabel: bool,
     num_labels: int,
     output_dir: str,
-    report_suffix: str = "eval_ensemble",
+    output_prefix: str,
     lxmert_model_name: str = LXMERT_MODEL_NAME,
     bart_model_name: str = MENTALBART_MODEL_NAME
-) -> Dict:
-    """Evaluates an ensemble of HybridFusionModels, similar to evaluate_model structure."""
-    if not dataloader:
-        logger.warning(f"Dataloader for '{report_suffix}' is None or empty. Skipping evaluation.")
-        # Return default dictionary structure
-        return {
-            'accuracy': 0, 'macro_f1': 0, 'weighted_f1': 0, 'hamming_loss': 1,
-            'micro_f1': 0, 'samples_f1': 0, 'accuracy_subset': 0, # Add subset acc for consistency
-            'report': "No data to evaluate."
-        }
+) -> Dict[str, float]:
+    """
+    Evaluates an ensemble of models on the provided data loader.
+    Loads each model, gets predictions, ensembles them, and calculates metrics.
+    
+    Args:
+        model_paths: List of paths to trained model checkpoints
+        data_loader: DataLoader for evaluation data
+        device: Device to run evaluation on
+        label_encoder: Label encoder for classes
+        is_multilabel: Whether task is multilabel or single-label
+        num_labels: Number of label classes
+        output_dir: Directory to save results
+        output_prefix: Prefix for output files
+        lxmert_model_name: LXMERT model name/path
+        bart_model_name: BART model name/path
+        
+    Returns:
+        Dictionary of evaluation metrics
+    """
+    logger.info(f"Evaluating ensemble of {len(model_paths)} models")
     if not model_paths:
-        logger.error("No model paths provided for ensemble evaluation.")
-        return {'error': 'No models provided'}
-
-    logger.info(f"--- Starting ENSEMBLE Evaluation ({report_suffix}) ---")
-    logger.info(f"Evaluating {len(model_paths)} models on {len(dataloader.dataset)} samples.")
-    logger.info(f"Task Type: {'Multi-Label' if is_multilabel else 'Single-Label (Multiclass)'}")
-
-    all_individual_model_logits = [] # Store logits from each model [model1_logits, model2_logits, ...]
-    all_labels_raw = None # Store true labels once (from the first model's pass)
-
-    # --- Get predictions from each model ---
+        logger.error("No model paths provided for ensemble evaluation")
+        return {}
+    
+    all_logits = []
+    all_labels = []
+    
+    # Get predictions from each model
     for model_idx, model_path in enumerate(model_paths):
-        logger.info(f"Loading and evaluating model {model_idx + 1}/{len(model_paths)}: {os.path.basename(model_path)}")
-
+        logger.info(f"Loading model {model_idx+1}/{len(model_paths)} from {model_path}")
         try:
-            # Instantiate the correct model architecture
+            # Initialize model
             model = HybridFusionModel(
                 num_labels=num_labels,
                 lxmert_model_name=lxmert_model_name,
                 bart_model_name=bart_model_name,
                 is_multilabel=is_multilabel
-            )
-            # Load state dict - try strict first, then fallback
-            try:
-                model.load_state_dict(torch.load(model_path, map_location=device), strict=True)
-                logger.info("Model state loaded successfully (strict=True).")
-            except RuntimeError as e:
-                logger.warning(f"Strict state dict loading failed for model {model_idx+1}: {e}. Attempting non-strict loading (strict=False).")
-                model.load_state_dict(torch.load(model_path, map_location=device), strict=False)
-                logger.info("Model state loaded with strict=False.")
-
-            model.to(device)
-            model.eval() # Set to evaluation mode
-        except FileNotFoundError:
-             logger.error(f"Model file not found: {model_path}. Skipping this model.")
-             continue
+            ).to(device)
+            
+            # Load weights
+            model.load_state_dict(torch.load(model_path, map_location=device))
+            model.eval()
+            
+            # Get predictions
+            model_logits = []
+            if model_idx == 0:  # Only collect labels once
+                with torch.no_grad():
+                    for batch in tqdm(data_loader, desc=f"Eval Model {model_idx+1}"):
+                        # Move inputs to device
+                        lxmert_input_ids = batch["lxmert_input_ids"].to(device)
+                        lxmert_attention_mask = batch["lxmert_attention_mask"].to(device)
+                        lxmert_token_type_ids = batch["lxmert_token_type_ids"].to(device)
+                        visual_feats = batch["visual_feats"].to(device)
+                        visual_pos = batch["visual_pos"].to(device)
+                        vis_attention_mask = batch["vis_attention_mask"].to(device)
+                        bart_input_ids = batch["bart_input_ids"].to(device)
+                        bart_attention_mask = batch["bart_attention_mask"].to(device)
+                        labels = batch["labels"].cpu()  # Keep labels on CPU
+                        
+                        # Forward pass
+                        outputs = model(
+                            lxmert_input_ids=lxmert_input_ids,
+                            lxmert_attention_mask=lxmert_attention_mask,
+                            lxmert_token_type_ids=lxmert_token_type_ids,
+                            visual_feats=visual_feats,
+                            visual_pos=visual_pos,
+                            vis_attention_mask=vis_attention_mask,
+                            bart_input_ids=bart_input_ids,
+                            bart_attention_mask=bart_attention_mask
+                        )
+                        
+                        model_logits.append(outputs.logits.cpu())
+                        all_labels.append(labels)
+            else:
+                with torch.no_grad():
+                    for batch in tqdm(data_loader, desc=f"Eval Model {model_idx+1}"):
+                        # Move inputs to device
+                        lxmert_input_ids = batch["lxmert_input_ids"].to(device)
+                        lxmert_attention_mask = batch["lxmert_attention_mask"].to(device)
+                        lxmert_token_type_ids = batch["lxmert_token_type_ids"].to(device)
+                        visual_feats = batch["visual_feats"].to(device)
+                        visual_pos = batch["visual_pos"].to(device)
+                        vis_attention_mask = batch["vis_attention_mask"].to(device)
+                        bart_input_ids = batch["bart_input_ids"].to(device)
+                        bart_attention_mask = batch["bart_attention_mask"].to(device)
+                        
+                        # Forward pass
+                        outputs = model(
+                            lxmert_input_ids=lxmert_input_ids,
+                            lxmert_attention_mask=lxmert_attention_mask,
+                            lxmert_token_type_ids=lxmert_token_type_ids,
+                            visual_feats=visual_feats,
+                            visual_pos=visual_pos,
+                            vis_attention_mask=vis_attention_mask,
+                            bart_input_ids=bart_input_ids,
+                            bart_attention_mask=bart_attention_mask
+                        )
+                        
+                        model_logits.append(outputs.logits.cpu())
+            
+            # Combine logits for this model
+            all_logits.append(torch.cat(model_logits, dim=0))
+            
+            # Clean up to save memory
+            del model, model_logits
+            gc.collect()
+            if device == torch.device('cuda'):
+                torch.cuda.empty_cache()
+                
         except Exception as e:
-            logger.error(f"Failed to load model {model_idx + 1} from {model_path}: {e}", exc_info=True)
-            continue # Skip this model if loading fails
-
-        # --- Collect logits and labels for this model ---
-        current_model_logits = []
-        batch_labels_list = [] # Collect labels only for the first model pass
-
-        eval_progress = tqdm(dataloader, desc=f"Eval Model {model_idx + 1}", leave=False)
-        with torch.no_grad():
-            for batch_idx, batch in enumerate(eval_progress):
-                try:
-                    # Move batch data to device - using the correct keys for HybridFusionModel
-                    lxmert_input_ids = batch["lxmert_input_ids"].to(device)
-                    lxmert_attention_mask = batch["lxmert_attention_mask"].to(device)
-                    lxmert_token_type_ids = batch["lxmert_token_type_ids"].to(device)
-                    visual_feats = batch["visual_feats"].to(device)
-                    visual_pos = batch["visual_pos"].to(device)
-                    vis_attention_mask = batch["vis_attention_mask"].to(device)
-                    bart_input_ids = batch["bart_input_ids"].to(device)
-                    bart_attention_mask = batch["bart_attention_mask"].to(device)
-                    labels = batch["labels"] # Keep on CPU for storage
-
-                    # Forward pass (only need logits)
-                    outputs = model(
-                        lxmert_input_ids=lxmert_input_ids,
-                        lxmert_attention_mask=lxmert_attention_mask,
-                        lxmert_token_type_ids=lxmert_token_type_ids,
-                        visual_feats=visual_feats,
-                        visual_pos=visual_pos,
-                        vis_attention_mask=vis_attention_mask,
-                        bart_input_ids=bart_input_ids,
-                        bart_attention_mask=bart_attention_mask,
-                        labels=None # No need to calculate loss here
-                    )
-
-                    current_model_logits.append(outputs.logits.cpu())
-
-                    # Store labels only during the first model's pass
-                    if model_idx == 0:
-                        batch_labels_list.append(labels.cpu())
-
-                except Exception as e:
-                    logger.error(f"Error during evaluation batch {batch_idx} for model {model_idx + 1}: {e}", exc_info=True)
-                    # Continue to next batch if one fails
-
-        # Concatenate logits for the current model
-        if current_model_logits:
-            all_individual_model_logits.append(torch.cat(current_model_logits, dim=0))
-        else:
-             logger.warning(f"No logits collected for model {model_idx + 1}. It might be skipped in the ensemble average.")
-
-        # Concatenate all labels after the first model's pass
-        if model_idx == 0 and batch_labels_list:
-            all_labels_raw = torch.cat(batch_labels_list, dim=0)
-        elif model_idx == 0 and not batch_labels_list:
-             logger.error("Failed to collect any labels during evaluation. Cannot calculate metrics.")
-             return {'error': 'Label collection failed'}
-
-        # Clean up memory for the current model
-        del model
-        gc.collect()
-        if device == torch.device('cuda'):
-            torch.cuda.empty_cache()
-
-    # --- Aggregate predictions and calculate metrics ---
-    if not all_individual_model_logits or all_labels_raw is None:
-        logger.error("Evaluation failed: No valid logits collected from any model or labels are missing.")
-        return {
-            'accuracy': 0, 'macro_f1': 0, 'weighted_f1': 0, 'hamming_loss': 1,
-            'micro_f1': 0, 'samples_f1': 0, 'accuracy_subset': 0,
-            'report': "Logit/Label collection failed."
-        }
-
-    # Stack logits from all models: shape (num_models, num_samples, num_labels)
-    stacked_logits = torch.stack(all_individual_model_logits, dim=0)
-    logger.info(f"Logits collected from {stacked_logits.shape[0]} models. Stacked shape: {stacked_logits.shape}")
-
-    # Average logits across models: shape (num_samples, num_labels)
-    avg_logits = torch.mean(stacked_logits, dim=0)
-
-    # --- Calculate Metrics based on Task Type (using logic from evaluate_model example) ---
-    metrics_dict = {}
-    report = "Report generation failed." # Default report
-
+            logger.error(f"Error evaluating model {model_idx+1}: {e}", exc_info=True)
+            continue
+    
+    if not all_logits:
+        logger.error("No models successfully evaluated")
+        return {}
+    
+    # Combine predictions from all models
+    ensemble_logits = torch.stack(all_logits).mean(dim=0)  # Average logits
+    all_labels_cat = torch.cat(all_labels, dim=0)
+    
+    # Calculate metrics
+    metrics = {}
     try:
         if is_multilabel:
-            logger.info(f"Calculating multi-label metrics for {report_suffix}...")
-            probs = torch.sigmoid(avg_logits).numpy()
-            preds = (probs > 0.5).astype(int) # Use 0.5 threshold
-            labels = all_labels_raw.numpy().astype(int) # Ground truth multi-hot
-
-            accuracy_subset = accuracy_score(labels, preds) # Exact match ratio
-            hamming = hamming_loss(labels, preds)
-            f1_micro = f1_score(labels, preds, average='micro', zero_division=0)
-            f1_macro = f1_score(labels, preds, average='macro', zero_division=0)
-            f1_weighted = f1_score(labels, preds, average='weighted', zero_division=0)
-            f1_samples = f1_score(labels, preds, average='samples', zero_division=0)
-
-            # Generate multi-label classification report
-            try:
-                report = classification_report(
-                    labels, preds,
-                    target_names=label_encoder.classes_,
-                    digits=4,
-                    zero_division=0
-                )
-            except Exception as cr_e:
-                 logger.error(f"Error generating multi-label classification report: {cr_e}")
-                 report = f"Error generating classification report: {cr_e}"
-
-            # Also log confusion matrix per label
-            try:
-                cm = multilabel_confusion_matrix(labels, preds)
-                cm_report_path = os.path.join(output_dir, f"confusion_matrix_{report_suffix}.txt")
-                with open(cm_report_path, "w") as f:
-                     f.write("Multilabel Confusion Matrix (per label):\n")
-                     for i, label_name in enumerate(label_encoder.classes_):
-                         f.write(f"\nLabel: {label_name}\n")
-                         f.write(f"{cm[i]}\n") # TN, FP / FN, TP
-                logger.info(f"Multilabel confusion matrix saved to {cm_report_path}")
-            except Exception as cm_e:
-                 logger.error(f"Error generating or saving multilabel confusion matrix: {cm_e}")
-
-            metrics_dict = {
-                'accuracy_subset': accuracy_subset, # Use specific name
-                'hamming_loss': hamming,
-                'micro_f1': f1_micro,
-                'macro_f1': f1_macro,
-                'weighted_f1': f1_weighted,
-                'samples_f1': f1_samples,
-                'report': report
-            }
-
-        else: # Single-label
-            logger.info(f"Calculating single-label metrics for {report_suffix}...")
-            preds = torch.argmax(avg_logits, dim=1).numpy()
-            labels = all_labels_raw.numpy() # Ground truth indices
-
-            accuracy = accuracy_score(labels, preds)
-            hamming = hamming_loss(labels, preds) # Can still be calculated
-            f1_micro = f1_score(labels, preds, average='micro', zero_division=0)
-            f1_macro = f1_score(labels, preds, average='macro', zero_division=0)
-            f1_weighted = f1_score(labels, preds, average='weighted', zero_division=0)
-            # f1_samples is less meaningful for single-label but calculate for consistency if needed
-            f1_samples = f1_score(labels, preds, average='samples', zero_division=0)
-
-            # Generate single-label classification report
-            try:
-                unique_numeric_labels = sorted(list(set(labels) | set(preds)))
-                # Ensure labels exist in the encoder before getting names
-                present_class_names = [label_encoder.classes_[i] for i in unique_numeric_labels if 0 <= i < len(label_encoder.classes_)]
-                numeric_labels_in_encoder = [i for i in unique_numeric_labels if 0 <= i < len(label_encoder.classes_)]
-
-                if not numeric_labels_in_encoder: # Handle case where no valid labels are predicted/present
-                    logger.warning(f"No valid labels found in predictions/ground truth for {report_suffix} report.")
-                    report = "No valid labels to report on."
-                else:
-                    report = classification_report(
-                        labels, preds,
-                        labels=numeric_labels_in_encoder, # Use numeric labels corresponding to known classes
-                        target_names=present_class_names,
-                        digits=4,
-                        zero_division=0
-                    )
-            except Exception as cr_e:
-                 logger.error(f"Error generating single-label classification report: {cr_e}")
-                 report = f"Error generating classification report: {cr_e}"
-
-            metrics_dict = {
-                'accuracy': accuracy,
-                'hamming_loss': hamming,
-                'micro_f1': f1_micro,
-                'macro_f1': f1_macro,
-                'weighted_f1': f1_weighted,
-                'samples_f1': f1_samples, # Included for consistency
-                'report': report
-            }
-
+            ensemble_probs = torch.sigmoid(ensemble_logits).numpy()
+            ensemble_preds = (ensemble_probs > 0.5).astype(int)
+            labels_np = all_labels_cat.numpy().astype(int)
+            
+            metrics['accuracy'] = accuracy_score(labels_np, ensemble_preds)
+            metrics['f1_micro'] = f1_score(labels_np, ensemble_preds, average='micro', zero_division=0)
+            metrics['f1_macro'] = f1_score(labels_np, ensemble_preds, average='macro', zero_division=0)
+            metrics['hamming_loss'] = hamming_loss(labels_np, ensemble_preds)
+            
+            # Generate classification report
+            class_names = label_encoder.classes_
+            report = classification_report(
+                labels_np, ensemble_preds, 
+                target_names=class_names, 
+                zero_division=0,
+                output_dict=True
+            )
+            
+            # Save confusion matrices for each class
+            mcm = multilabel_confusion_matrix(labels_np, ensemble_preds)
+            
+        else:  # Single-label
+            ensemble_preds = torch.argmax(ensemble_logits, dim=1).numpy()
+            labels_np = all_labels_cat.numpy()
+            
+            metrics['accuracy'] = accuracy_score(labels_np, ensemble_preds)
+            metrics['f1_micro'] = f1_score(labels_np, ensemble_preds, average='micro', zero_division=0)
+            metrics['f1_macro'] = f1_score(labels_np, ensemble_preds, average='macro', zero_division=0)
+            
+            # Generate classification report
+            class_names = label_encoder.classes_
+            report = classification_report(
+                labels_np, ensemble_preds, 
+                target_names=class_names, 
+                zero_division=0,
+                output_dict=True
+            )
+        
+        # Log and save results
+        logger.info(f"Ensemble Metrics:")
+        for metric, value in metrics.items():
+            logger.info(f"  {metric}: {value:.4f}")
+        
+        # Save detailed report
+        results_file = os.path.join(output_dir, f"{output_prefix}_results.json")
+        with open(results_file, 'w') as f:
+            json.dump({
+                'metrics': metrics,
+                'classification_report': report
+            }, f, indent=2)
+        
+        # Save predictions
+        preds_file = os.path.join(output_dir, f"{output_prefix}_predictions.npz")
+        np.savez(
+            preds_file,
+            ensemble_logits=ensemble_logits.numpy(),
+            ensemble_preds=ensemble_preds,
+            true_labels=labels_np
+        )
+        
+        logger.info(f"Results saved to {results_file}")
+        logger.info(f"Predictions saved to {preds_file}")
+        
     except Exception as e:
-        logger.error(f"Error calculating metrics or generating report for {report_suffix}: {e}", exc_info=True)
-        # Return default values in case of error during metric calculation
-        metrics_dict = {
-             'accuracy': 0, 'macro_f1': 0, 'weighted_f1': 0, 'hamming_loss': 1,
-             'micro_f1': 0, 'samples_f1': 0, 'accuracy_subset': 0,
-             'report': f"Error during metric calculation: {e}"
-             }
-
-    # --- Save Report ---
-    report_path = os.path.join(output_dir, f"classification_report_{report_suffix}.txt")
-    try:
-        with open(report_path, "w", encoding='utf-8') as f:
-            f.write(f"--- Ensemble Evaluation Metrics ({report_suffix}) ---\n\n")
-            # Write metrics, handling potential missing keys and formatting floats
-            f.write(f"Accuracy (Subset - MultiLabel): {metrics_dict.get('accuracy_subset', 'N/A'):.4f}\n")
-            f.write(f"Accuracy (SingleLabel): {metrics_dict.get('accuracy', 'N/A'):.4f}\n")
-            f.write(f"Hamming Loss: {metrics_dict.get('hamming_loss', 'N/A'):.4f}\n")
-            f.write(f"Micro F1: {metrics_dict.get('micro_f1', 'N/A'):.4f}\n")
-            f.write(f"Macro F1: {metrics_dict.get('macro_f1', 'N/A'):.4f}\n")
-            f.write(f"Weighted F1: {metrics_dict.get('weighted_f1', 'N/A'):.4f}\n")
-            f.write(f"Samples F1: {metrics_dict.get('samples_f1', 'N/A'):.4f}\n")
-
-            f.write("\n--- Classification Report ---\n\n")
-            f.write(metrics_dict.get('report', 'Report generation failed.'))
-
-        logger.info(f"Evaluation report saved to: {report_path}")
-    except Exception as e:
-        logger.error(f"Failed to save evaluation report to {report_path}: {e}")
-
-    logger.info(f"--- Ensemble Evaluation ({report_suffix}) Complete ---")
-    # Log key metrics directly
-    log_key = 'accuracy_subset' if is_multilabel else 'accuracy'
-    logger.info(f"Final {report_suffix} {log_key}: {metrics_dict.get(log_key, 'N/A'):.4f}, Macro F1: {metrics_dict.get('macro_f1', 'N/A'):.4f}")
-
-    # Ensure all expected keys are present in the returned dict, even if calculation failed
-    final_metrics = {
-        'accuracy': metrics_dict.get('accuracy', 0),
-        'accuracy_subset': metrics_dict.get('accuracy_subset', 0),
-        'hamming_loss': metrics_dict.get('hamming_loss', 1),
-        'micro_f1': metrics_dict.get('micro_f1', 0),
-        'macro_f1': metrics_dict.get('macro_f1', 0),
-        'weighted_f1': metrics_dict.get('weighted_f1', 0),
-        'samples_f1': metrics_dict.get('samples_f1', 0),
-        'report': metrics_dict.get('report', 'N/A')
-    }
-
-    return final_metrics
+        logger.error(f"Error calculating ensemble metrics: {e}", exc_info=True)
+    
+    return metrics
 
 # --- Main Pipeline Function (Adapted) ---
 def run_hybrid_ensemble_pipeline(
@@ -1344,13 +1331,44 @@ def run_hybrid_ensemble_pipeline(
 
     logger.info("--- Step 7: Creating DataLoaders ---")
     try:
-        nw = 2 if torch.cuda.is_available() else 0; pm = True if device == torch.device('cuda') else False
-        # Use persistent_workers=True and prefetch_factor if DataLoader becomes bottleneck
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=nw, pin_memory=pm)
-        val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=nw, pin_memory=pm)
-        test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=nw, pin_memory=pm) if test_dataset else None
-        if not train_loader or not val_loader: raise ValueError("Dataloader creation resulted in empty loader.")
-    except Exception as e: logger.error(f"Failed to create DataLoaders: {e}", exc_info=True); return
+        nw = 0  # Set num_workers to 0 to avoid potential multiprocessing issues
+        pm = True if device == torch.device('cuda') else False
+        
+        # Use the custom_collate_fn to handle variable-sized features
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=BATCH_SIZE, 
+            shuffle=True, 
+            num_workers=nw, 
+            pin_memory=pm,
+            collate_fn=custom_collate_fn
+        )
+        
+        val_loader = DataLoader(
+            val_dataset, 
+            batch_size=BATCH_SIZE, 
+            shuffle=False, 
+            num_workers=nw, 
+            pin_memory=pm,
+            collate_fn=custom_collate_fn
+        )
+        
+        test_loader = None
+        if test_dataset:
+            test_loader = DataLoader(
+                test_dataset, 
+                batch_size=BATCH_SIZE, 
+                shuffle=False, 
+                num_workers=nw, 
+                pin_memory=pm,
+                collate_fn=custom_collate_fn
+            )
+            
+        if not train_loader or not val_loader: 
+            raise ValueError("Dataloader creation resulted in empty loader.")
+    except Exception as e: 
+        logger.error(f"Failed to create DataLoaders: {e}", exc_info=True); 
+        return
 
 
     # --- 6. Ensemble Training ---
