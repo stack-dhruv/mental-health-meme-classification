@@ -446,6 +446,7 @@ def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multil
     avg_loss = total_loss / len(data_loader)
     logger.info(f"Average {split_name} Loss: {avg_loss:.4f}")
 
+    # --- Calculate hamming loss for both single-label and multi-label ---
     if is_multilabel:
         accuracy = accuracy_score(all_labels, all_preds)
         f1_micro = f1_score(all_labels, all_preds, average='micro', zero_division=0)
@@ -467,14 +468,17 @@ def evaluate_model(model, data_loader, device, loss_fn, label_encoder, is_multil
         f1_micro = f1_score(all_labels, all_preds, average='micro', zero_division=0)
         f1_macro = f1_score(all_labels, all_preds, average='macro', zero_division=0)
         f1_weighted = f1_score(all_labels, all_preds, average='weighted', zero_division=0)
+        # For single-label, convert to 2D arrays for hamming_loss
+        hamming = hamming_loss(np.array(all_labels).reshape(-1, 1), np.array(all_preds).reshape(-1, 1))
         report = classification_report(all_labels, all_preds, target_names=label_encoder.classes_, zero_division=0)
 
         logger.info(f"{split_name} Accuracy: {accuracy:.4f}")
         logger.info(f"{split_name} F1 Micro: {f1_micro:.4f}")
         logger.info(f"{split_name} F1 Macro: {f1_macro:.4f}")
         logger.info(f"{split_name} F1 Weighted: {f1_weighted:.4f}")
+        logger.info(f"{split_name} Hamming Loss: {hamming:.4f}")
         logger.info(f"{split_name} Classification Report:\n{report}")
-        return {'loss': avg_loss, 'accuracy': accuracy, 'f1_micro': f1_micro, 'f1_macro': f1_macro, 'f1_weighted': f1_weighted, 'report': report}
+        return {'loss': avg_loss, 'accuracy': accuracy, 'f1_micro': f1_micro, 'f1_macro': f1_macro, 'f1_weighted': f1_weighted, 'hamming': hamming, 'report': report}
 
 # --- Main Pipeline Function ---
 
@@ -705,6 +709,82 @@ def run_mental_rag_pipeline(dataset_type: str, seed: int):
     except Exception as e:
         logger.error(f"Could not serialize or save training history: {e}")
 
+    # --- Plotting Training vs Validation Loss ---
+    try:
+        epochs = list(range(1, NUM_EPOCHS + 1))
+        train_losses = history['train_loss']
+        val_losses = history[f'{eval_split_name.lower()}_loss']
+
+        plt.figure(figsize=(8, 6))
+        plt.plot(epochs, train_losses, label='Train Loss', marker='o')
+        if any(v is not None for v in val_losses):
+            # Only plot if there is at least one non-None value
+            plt.plot(epochs, [v if v is not None else float('nan') for v in val_losses], label=f'{eval_split_name} Loss', marker='o')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.title('Training vs Validation Loss')
+        plt.legend()
+        plt.grid(True)
+        loss_plot_path = os.path.join(output_dir, f"train_vs_{eval_split_name.lower()}_loss_seed_{seed}.png")
+        plt.savefig(loss_plot_path)
+        plt.close()
+        logger.info(f"Training vs Validation Loss plot saved to {loss_plot_path}")
+    except Exception as e:
+        logger.error(f"Could not plot training vs validation loss: {e}")
+
+    # --- Plotting Hamming Loss vs Epoch (always, if present) ---
+    try:
+        hamming_losses = []
+        for metrics in history[f'{eval_split_name.lower()}_metrics']:
+            if metrics and 'hamming' in metrics:
+                hamming_losses.append(metrics['hamming'])
+            else:
+                hamming_losses.append(float('nan'))
+        if any(not np.isnan(h) for h in hamming_losses):
+            plt.figure(figsize=(8, 6))
+            plt.plot(epochs, hamming_losses, label='Hamming Loss', marker='o', color='red')
+            plt.xlabel('Epoch')
+            plt.ylabel('Hamming Loss')
+            plt.title('Hamming Loss vs Epoch')
+            plt.legend()
+            plt.grid(True)
+            hamming_plot_path = os.path.join(output_dir, f"hamming_loss_vs_epoch_seed_{seed}.png")
+            plt.savefig(hamming_plot_path)
+            plt.close()
+            logger.info(f"Hamming Loss vs Epoch plot saved to {hamming_plot_path}")
+    except Exception as e:
+        logger.error(f"Could not plot hamming loss: {e}")
+
+    # --- Plotting F1 Macro and F1 Weighted vs Epoch ---
+    try:
+        f1_macro = []
+        f1_weighted = []
+        for metrics in history[f'{eval_split_name.lower()}_metrics']:
+            if metrics and 'f1_macro' in metrics:
+                f1_macro.append(metrics['f1_macro'])
+            else:
+                f1_macro.append(float('nan'))
+            if metrics and 'f1_weighted' in metrics:
+                f1_weighted.append(metrics['f1_weighted'])
+            else:
+                f1_weighted.append(float('nan'))
+        if any(not np.isnan(f) for f in f1_macro) or any(not np.isnan(f) for f in f1_weighted):
+            plt.figure(figsize=(8, 6))
+            if any(not np.isnan(f) for f in f1_macro):
+                plt.plot(epochs, f1_macro, label='F1 Macro', marker='o', color='blue')
+            if any(not np.isnan(f) for f in f1_weighted):
+                plt.plot(epochs, f1_weighted, label='F1 Weighted', marker='o', color='green')
+            plt.xlabel('Epoch')
+            plt.ylabel('F1 Score')
+            plt.title('F1 Macro and F1 Weighted vs Epoch')
+            plt.legend()
+            plt.grid(True)
+            f1_plot_path = os.path.join(output_dir, f"f1_macro_weighted_vs_epoch_seed_{seed}.png")
+            plt.savefig(f1_plot_path)
+            plt.close()
+            logger.info(f"F1 Macro/Weighted vs Epoch plot saved to {f1_plot_path}")
+    except Exception as e:
+        logger.error(f"Could not plot F1 Macro/Weighted: {e}")
 
     run_end_time = time.time()
     logger.info(f"Pipeline run for seed {seed} completed in {(run_end_time - run_start_time)/60:.2f} minutes.")
