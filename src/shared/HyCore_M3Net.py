@@ -578,6 +578,42 @@ class MentalHealthMemeDataset(Dataset):
         }
 
 # --- Hybrid Model Architecture ---
+class CrossModalAttention(nn.Module):
+    """Cross-modal attention mechanism for enhancing interaction between modalities."""
+    def __init__(self, query_dim, key_dim, dropout_prob=0.1):
+        super().__init__()
+        self.query_projection = nn.Linear(query_dim, key_dim)
+        self.key_projection = nn.Linear(key_dim, key_dim)
+        self.value_projection = nn.Linear(key_dim, key_dim)
+        self.scale = key_dim ** 0.5
+        self.dropout = nn.Dropout(dropout_prob)
+        
+    def forward(self, query, key_value):
+        """
+        Compute cross-attention: query attends to key_value
+        Args:
+            query: tensor of shape [batch_size, query_dim]
+            key_value: tensor of shape [batch_size, key_dim]
+        Returns:
+            attended_features: tensor of shape [batch_size, key_dim]
+        """
+        # Project query to match key dimensions
+        query_proj = self.query_projection(query).unsqueeze(1)  # [batch_size, 1, key_dim]
+        
+        # Project keys and values
+        key_proj = self.key_projection(key_value).unsqueeze(1)  # [batch_size, 1, key_dim]
+        value_proj = self.value_projection(key_value).unsqueeze(1)  # [batch_size, 1, key_dim]
+        
+        # Compute attention scores
+        attention_scores = torch.matmul(query_proj, key_proj.transpose(-1, -2)) / self.scale
+        attention_probs = F.softmax(attention_scores, dim=-1)
+        attention_probs = self.dropout(attention_probs)
+        
+        # Apply attention to values
+        attended_features = torch.matmul(attention_probs, value_proj).squeeze(1)  # [batch_size, key_dim]
+        
+        return attended_features
+
 class HybridFusionModel(nn.Module):
     def __init__(self,
                  num_labels: int,
@@ -608,7 +644,43 @@ class HybridFusionModel(nn.Module):
             logger.info(f"  MentalBART loaded. Hidden size: {self.bart_hidden_size}")
         except Exception as e: logger.error(f"Failed to load MentalBART: {e}", exc_info=True); raise
 
-        # Fusion Layer (Example: Concatenate + MLP)
+        # Cross-modal attention layers
+        self.lxmert_to_bart_attention = CrossModalAttention(
+            query_dim=self.lxmert_hidden_size, 
+            key_dim=self.bart_hidden_size,
+            dropout_prob=dropout_prob
+        )
+        self.bart_to_lxmert_attention = CrossModalAttention(
+            query_dim=self.bart_hidden_size, 
+            key_dim=self.lxmert_hidden_size,
+            dropout_prob=dropout_prob
+        )
+        
+        # Gating mechanisms to control information flow
+        self.lxmert_gate = nn.Sequential(
+            nn.Linear(self.lxmert_hidden_size * 2, self.lxmert_hidden_size),
+            nn.Sigmoid()
+        )
+        self.bart_gate = nn.Sequential(
+            nn.Linear(self.bart_hidden_size * 2, self.bart_hidden_size),
+            nn.Sigmoid()
+        )
+        
+        # Feature enhancement layers
+        self.lxmert_enhance = nn.Sequential(
+            nn.Linear(self.lxmert_hidden_size * 2, self.lxmert_hidden_size),
+            nn.LayerNorm(self.lxmert_hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout_prob)
+        )
+        self.bart_enhance = nn.Sequential(
+            nn.Linear(self.bart_hidden_size * 2, self.bart_hidden_size),
+            nn.LayerNorm(self.bart_hidden_size),
+            nn.ReLU(),
+            nn.Dropout(dropout_prob)
+        )
+
+        # Fusion Layer - now handles enhanced representations
         self.fusion_dim = self.lxmert_hidden_size + self.bart_hidden_size
         logger.info(f"  Fusion input dimension: {self.fusion_dim}")
         self.fusion_layer = nn.Sequential(
@@ -626,6 +698,7 @@ class HybridFusionModel(nn.Module):
         # Loss Function
         self.loss_fct = nn.BCEWithLogitsLoss() if is_multilabel else nn.CrossEntropyLoss()
         logger.info(f"  Using loss: {'BCEWithLogitsLoss' if is_multilabel else 'CrossEntropyLoss'}")
+        logger.info(f"  Cross-Modal Attention added for enhanced modality interaction")
 
 
     def forward(self,
@@ -634,13 +707,12 @@ class HybridFusionModel(nn.Module):
                 lxmert_token_type_ids: torch.Tensor,
                 visual_feats: torch.Tensor,
                 visual_pos: torch.Tensor,
-                vis_attention_mask: torch.Tensor, # Needed for LXMERT visual input
+                vis_attention_mask: torch.Tensor, 
                 bart_input_ids: torch.Tensor,
                 bart_attention_mask: torch.Tensor,
                 labels: Optional[torch.Tensor] = None):
 
         # 1. Process with LXMERT
-        # LXMERT output includes sequence outputs and pooled output
         try:
             lxmert_outputs = self.lxmert(
                 input_ids=lxmert_input_ids,
@@ -648,42 +720,61 @@ class HybridFusionModel(nn.Module):
                 visual_feats=visual_feats,
                 visual_pos=visual_pos,
                 token_type_ids=lxmert_token_type_ids,
-                visual_attention_mask=vis_attention_mask, # Pass visual mask
+                visual_attention_mask=vis_attention_mask,
                 output_attentions=False,
                 output_hidden_states=False,
-                return_dict=True # Ensure dict output
+                return_dict=True
             )
-            # Use the pooled output which combines vision and language
-            H_lxmert = lxmert_outputs.pooled_output # Shape: (batch_size, lxmert_hidden_size)
+            H_lxmert = lxmert_outputs.pooled_output
         except Exception as e:
             logger.error(f"Error in LXMERT forward pass: {e}", exc_info=True)
-            # Create dummy output to prevent crashing later? Or re-raise?
             H_lxmert = torch.zeros((lxmert_input_ids.shape[0], self.lxmert_hidden_size), device=lxmert_input_ids.device)
-            # raise # Option to halt on error
 
         # 2. Process with MentalBART Encoder
         try:
-            # We only need the encoder's output, pool it (e.g., take first token's state)
             bart_encoder_outputs = self.bart.encoder(
                 input_ids=bart_input_ids,
                 attention_mask=bart_attention_mask,
                 return_dict=True
             )
-            H_context = bart_encoder_outputs.last_hidden_state[:, 0, :] # Use CLS token equivalent - Shape: (batch_size, bart_hidden_size)
+            H_context = bart_encoder_outputs.last_hidden_state[:, 0, :]
         except Exception as e:
             logger.error(f"Error in MentalBART encoder forward pass: {e}", exc_info=True)
             H_context = torch.zeros((bart_input_ids.shape[0], self.bart_hidden_size), device=bart_input_ids.device)
-            # raise # Option to halt on error
 
+        # 3. Cross-Modal Attention - Let each modality attend to the other
+        # LXMERT attends to BART
+        H_lxmert_attends_to_bart = self.lxmert_to_bart_attention(H_lxmert, H_context)
+        # BART attends to LXMERT
+        H_bart_attends_to_lxmert = self.bart_to_lxmert_attention(H_context, H_lxmert)
+        
+        # 4. Gating Mechanism - Control information flow
+        lxmert_gate_values = self.lxmert_gate(torch.cat([H_lxmert, H_lxmert_attends_to_bart], dim=1))
+        bart_gate_values = self.bart_gate(torch.cat([H_context, H_bart_attends_to_lxmert], dim=1))
+        
+        # 5. Apply gates and enhance features
+        H_lxmert_enhanced_input = torch.cat([
+            H_lxmert,
+            lxmert_gate_values * H_lxmert_attends_to_bart
+        ], dim=1)
+        
+        H_bart_enhanced_input = torch.cat([
+            H_context,
+            bart_gate_values * H_bart_attends_to_lxmert
+        ], dim=1)
+        
+        # Apply enhancement layers
+        H_lxmert_enhanced = self.lxmert_enhance(H_lxmert_enhanced_input)
+        H_bart_enhanced = self.bart_enhance(H_bart_enhanced_input)
 
-        # 3. Fuse representations
-        combined_features = torch.cat((H_lxmert, H_context), dim=1) # Shape: (batch_size, fusion_dim)
-        fused_output = self.fusion_layer(combined_features) # Shape: (batch_size, classifier_input_dim)
+        # 6. Fuse enhanced representations
+        combined_features = torch.cat((H_lxmert_enhanced, H_bart_enhanced), dim=1)
+        fused_output = self.fusion_layer(combined_features)
 
-        # 4. Classify
-        logits = self.classifier(fused_output) # Shape: (batch_size, num_labels)
+        # 7. Classify
+        logits = self.classifier(fused_output)
 
-        # 5. Calculate Loss
+        # 8. Calculate Loss
         loss = None
         if labels is not None:
              # Ensure labels are on the same device as logits
