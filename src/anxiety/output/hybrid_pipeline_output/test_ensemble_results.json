@@ -1,0 +1,70 @@
+{
+  "metrics": {
+    "accuracy": 0.5414110429447853,
+    "f1_micro": 0.5414110429447853,
+    "f1_macro": 0.44296902490376006
+  },
+  "classification_report": {
+    "Difficulty Relaxing": {
+      "precision": 0.6804123711340206,
+      "recall": 0.6470588235294118,
+      "f1-score": 0.6633165829145728,
+      "support": 102.0
+    },
+    "Excessive Worry": {
+      "precision": 0.46875,
+      "recall": 0.4891304347826087,
+      "f1-score": 0.4787234042553192,
+      "support": 92.0
+    },
+    "Impending Doom": {
+      "precision": 0.5576923076923077,
+      "recall": 0.5523809523809524,
+      "f1-score": 0.5550239234449761,
+      "support": 105.0
+    },
+    "Irritability": {
+      "precision": 0.29411764705882354,
+      "recall": 0.13513513513513514,
+      "f1-score": 0.18518518518518517,
+      "support": 37.0
+    },
+    "Lack of Worry Control": {
+      "precision": 0.6323529411764706,
+      "recall": 0.4574468085106383,
+      "f1-score": 0.5308641975308642,
+      "support": 94.0
+    },
+    "Nervousness": {
+      "precision": 0.6534653465346535,
+      "recall": 0.6226415094339622,
+      "f1-score": 0.6376811594202898,
+      "support": 106.0
+    },
+    "Restlessness": {
+      "precision": 0.41420118343195267,
+      "recall": 0.6086956521739131,
+      "f1-score": 0.4929577464788733,
+      "support": 115.0
+    },
+    "Unknown Anxiety": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 1.0
+    },
+    "accuracy": 0.5414110429447853,
+    "macro avg": {
+      "precision": 0.46262397462852856,
+      "recall": 0.4390611644933277,
+      "f1-score": 0.44296902490376006,
+      "support": 652.0
+    },
+    "weighted avg": {
+      "precision": 0.5495532920283358,
+      "recall": 0.5414110429447853,
+      "f1-score": 0.5383677711255713,
+      "support": 652.0
+    }
+  }
+}

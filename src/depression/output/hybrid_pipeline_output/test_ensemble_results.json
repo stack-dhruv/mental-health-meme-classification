@@ -1,0 +1,88 @@
+{
+  "metrics": {
+    "accuracy": 0.43653846153846154,
+    "f1_micro": 0.5939086294416244,
+    "f1_macro": 0.46095144135729016,
+    "hamming_loss": 0.10256410256410256
+  },
+  "classification_report": {
+    "Concentration Problem": {
+      "precision": 0.9782608695652174,
+      "recall": 0.6818181818181818,
+      "f1-score": 0.8035714285714285,
+      "support": 66.0
+    },
+    "Eating Disorder": {
+      "precision": 0.7368421052631579,
+      "recall": 0.7608695652173914,
+      "f1-score": 0.7486631016042781,
+      "support": 92.0
+    },
+    "Feeling Down": {
+      "precision": 0.7933884297520661,
+      "recall": 0.44036697247706424,
+      "f1-score": 0.5663716814159293,
+      "support": 218.0
+    },
+    "Lack of Energy": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 0.0
+    },
+    "Lack of Interest": {
+      "precision": 0.9,
+      "recall": 0.2535211267605634,
+      "f1-score": 0.3956043956043956,
+      "support": 71.0
+    },
+    "Low Self-Esteem": {
+      "precision": 0.8695652173913043,
+      "recall": 0.17543859649122806,
+      "f1-score": 0.291970802919708,
+      "support": 114.0
+    },
+    "Self-Harm": {
+      "precision": 0.5714285714285714,
+      "recall": 0.5925925925925926,
+      "f1-score": 0.5818181818181818,
+      "support": 81.0
+    },
+    "Sleeping Disorder": {
+      "precision": 0.8571428571428571,
+      "recall": 0.6835443037974683,
+      "f1-score": 0.7605633802816901,
+      "support": 79.0
+    },
+    "Unknown Depression": {
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1-score": 0.0,
+      "support": 8.0
+    },
+    "micro avg": {
+      "precision": 0.7748344370860927,
+      "recall": 0.48148148148148145,
+      "f1-score": 0.5939086294416244,
+      "support": 729.0
+    },
+    "macro avg": {
+      "precision": 0.634069783393686,
+      "recall": 0.3986834821282767,
+      "f1-score": 0.46095144135729016,
+      "support": 729.0
+    },
+    "weighted avg": {
+      "precision": 0.7988255192648478,
+      "recall": 0.48148148148148145,
+      "f1-score": 0.5678547456409678,
+      "support": 729.0
+    },
+    "samples avg": {
+      "precision": 0.6576923076923077,
+      "recall": 0.5485576923076924,
+      "f1-score": 0.5808333333333333,
+      "support": 729.0
+    }
+  }
+}

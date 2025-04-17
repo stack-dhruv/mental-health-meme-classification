@@ -119,7 +119,10 @@ def extract_figurative_reasoning(image_bytes, analysis_type):
         base64_img = encode_image(img, format=image_format)
         if base64_img is None: return "Error: Could not encode image for API."
     except Exception as e: return f"Error processing image before API call: {e}"
-    prompt_template = """Analyze the following {analysis_topic} meme image to extract common sense reasoning in the form of triples... [rest of your prompt]""" # Use the full prompt from your example
+    prompt_template = """Analyze the following {analysis_topic} meme image to extract common sense reasoning in the form of triples. These relationships should capture the following elements:
+1. Cause-effect: Identify concrete causes or results of the situation depicted in the meme.
+2. Figurative Understanding: Capture underlying metaphors, analogies, or symbolic meanings that convey the meme’s deeper message, including any ironic or humorous undertones.
+3. Mental State: Capture specific mental or emotional states depicted in the meme.""" # Use the full prompt from your example
     prompt = prompt_template.format(analysis_topic=analysis_type.upper())
     payload = {"messages": [{"role": "user", "content": [{"type": "text", "text": prompt}, {"type": "image_url", "image_url": {"url": f"data:image/{image_format.lower()};base64,{base64_img}"}}]}], "model": "Qwen/Qwen2.5-VL-7B-Instruct", "max_tokens": 512, "temperature": 0.1, "top_p": 0.001}
     try:

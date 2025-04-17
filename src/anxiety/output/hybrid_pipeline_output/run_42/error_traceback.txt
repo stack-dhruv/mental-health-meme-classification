@@ -1,0 +1,43 @@
+Traceback (most recent call last):
+  File "/media/nas_mount/avinash_ocr/Dhruvkumar_Patel_MT24032/others/mental-health-meme-classification/src/shared/HyCore_M3Net.py", line 1382, in run_hybrid_ensemble_pipeline
+    history, best_path = train_and_evaluate(
+                         ^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/Dhruvkumar_Patel_MT24032/others/mental-health-meme-classification/src/shared/HyCore_M3Net.py", line 672, in train_and_evaluate
+    for batch_idx, batch in enumerate(train_progress):
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/tqdm/std.py", line 1181, in __iter__
+    for obj in iterable:
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/dataloader.py", line 630, in __next__
+    data = self._next_data()
+           ^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/dataloader.py", line 1345, in _next_data
+    return self._process_data(data)
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/dataloader.py", line 1371, in _process_data
+    data.reraise()
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/_utils.py", line 694, in reraise
+    raise exception
+RuntimeError: Caught RuntimeError in DataLoader worker process 1.
+Original Traceback (most recent call last):
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/worker.py", line 308, in _worker_loop
+    data = fetcher.fetch(index)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/fetch.py", line 54, in fetch
+    return self.collate_fn(data)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/collate.py", line 265, in default_collate
+    return collate(batch, collate_fn_map=default_collate_fn_map)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/collate.py", line 127, in collate
+    return elem_type({key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem})
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/collate.py", line 127, in <dictcomp>
+    return elem_type({key: collate([d[key] for d in batch], collate_fn_map=collate_fn_map) for key in elem})
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/collate.py", line 119, in collate
+    return collate_fn_map[elem_type](batch, collate_fn_map=collate_fn_map)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/nas_mount/avinash_ocr/.conda/envs_dirs/flame/lib/python3.11/site-packages/torch/utils/data/_utils/collate.py", line 161, in collate_tensor_fn
+    out = elem.new(storage).resize_(len(batch), *list(elem.size()))
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Trying to resize storage that is not resizable
+
