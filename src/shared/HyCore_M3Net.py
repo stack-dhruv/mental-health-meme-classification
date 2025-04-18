@@ -640,47 +640,53 @@ class HybridFusionModel(nn.Module):
         # Load MentalBART base model (only need encoder)
         try:
             self.bart = BartModel.from_pretrained(bart_model_name)
-            self.bart_hidden_size = self.bart.config.hidden_size # Usually 768 for base
+            self.bart_hidden_size = self.bart.config.hidden_size # Usually 768 for base, 1024 for Tianlin668/MentalBART
             logger.info(f"  MentalBART loaded. Hidden size: {self.bart_hidden_size}")
         except Exception as e: logger.error(f"Failed to load MentalBART: {e}", exc_info=True); raise
 
         # Cross-modal attention layers
         self.lxmert_to_bart_attention = CrossModalAttention(
-            query_dim=self.lxmert_hidden_size, 
-            key_dim=self.bart_hidden_size,
+            query_dim=self.lxmert_hidden_size,
+            key_dim=self.bart_hidden_size, # Output dim will be bart_hidden_size
             dropout_prob=dropout_prob
         )
         self.bart_to_lxmert_attention = CrossModalAttention(
-            query_dim=self.bart_hidden_size, 
-            key_dim=self.lxmert_hidden_size,
+            query_dim=self.bart_hidden_size,
+            key_dim=self.lxmert_hidden_size, # Output dim will be lxmert_hidden_size
             dropout_prob=dropout_prob
         )
-        
+
         # Gating mechanisms to control information flow
+        # Input is concatenation of original feature and cross-attended feature
+        gate_input_dim = self.lxmert_hidden_size + self.bart_hidden_size
         self.lxmert_gate = nn.Sequential(
-            nn.Linear(self.lxmert_hidden_size * 2, self.lxmert_hidden_size),
+            nn.Linear(gate_input_dim, self.bart_hidden_size), # Output dim matches H_lxmert_attends_to_bart
             nn.Sigmoid()
         )
         self.bart_gate = nn.Sequential(
-            nn.Linear(self.bart_hidden_size * 2, self.bart_hidden_size),
+            nn.Linear(gate_input_dim, self.lxmert_hidden_size), # Output dim matches H_bart_attends_to_lxmert
             nn.Sigmoid()
         )
-        
+
         # Feature enhancement layers
+        # Input is concatenation of original feature and *gated* cross-attended feature
+        lxmert_enhance_input_dim = self.lxmert_hidden_size + self.bart_hidden_size # H_lxmert + gated(H_lxmert_attends_to_bart)
+        bart_enhance_input_dim = self.bart_hidden_size + self.lxmert_hidden_size   # H_context + gated(H_bart_attends_to_lxmert)
+
         self.lxmert_enhance = nn.Sequential(
-            nn.Linear(self.lxmert_hidden_size * 2, self.lxmert_hidden_size),
+            nn.Linear(lxmert_enhance_input_dim, self.lxmert_hidden_size), # Output original lxmert dim
             nn.LayerNorm(self.lxmert_hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout_prob)
         )
         self.bart_enhance = nn.Sequential(
-            nn.Linear(self.bart_hidden_size * 2, self.bart_hidden_size),
+            nn.Linear(bart_enhance_input_dim, self.bart_hidden_size), # Output original bart dim
             nn.LayerNorm(self.bart_hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout_prob)
         )
 
-        # Fusion Layer - now handles enhanced representations
+        # Fusion Layer - now handles enhanced representations (original dims restored)
         self.fusion_dim = self.lxmert_hidden_size + self.bart_hidden_size
         logger.info(f"  Fusion input dimension: {self.fusion_dim}")
         self.fusion_layer = nn.Sequential(
@@ -707,7 +713,7 @@ class HybridFusionModel(nn.Module):
                 lxmert_token_type_ids: torch.Tensor,
                 visual_feats: torch.Tensor,
                 visual_pos: torch.Tensor,
-                vis_attention_mask: torch.Tensor, 
+                vis_attention_mask: torch.Tensor,
                 bart_input_ids: torch.Tensor,
                 bart_attention_mask: torch.Tensor,
                 labels: Optional[torch.Tensor] = None):
@@ -725,7 +731,7 @@ class HybridFusionModel(nn.Module):
                 output_hidden_states=False,
                 return_dict=True
             )
-            H_lxmert = lxmert_outputs.pooled_output
+            H_lxmert = lxmert_outputs.pooled_output # Shape: [B, lxmert_hidden_size]
         except Exception as e:
             logger.error(f"Error in LXMERT forward pass: {e}", exc_info=True)
             H_lxmert = torch.zeros((lxmert_input_ids.shape[0], self.lxmert_hidden_size), device=lxmert_input_ids.device)
@@ -737,38 +743,45 @@ class HybridFusionModel(nn.Module):
                 attention_mask=bart_attention_mask,
                 return_dict=True
             )
-            H_context = bart_encoder_outputs.last_hidden_state[:, 0, :]
+            H_context = bart_encoder_outputs.last_hidden_state[:, 0, :] # Shape: [B, bart_hidden_size]
         except Exception as e:
             logger.error(f"Error in MentalBART encoder forward pass: {e}", exc_info=True)
             H_context = torch.zeros((bart_input_ids.shape[0], self.bart_hidden_size), device=bart_input_ids.device)
 
         # 3. Cross-Modal Attention - Let each modality attend to the other
         # LXMERT attends to BART
-        H_lxmert_attends_to_bart = self.lxmert_to_bart_attention(H_lxmert, H_context)
+        H_lxmert_attends_to_bart = self.lxmert_to_bart_attention(H_lxmert, H_context) # Shape: [B, bart_hidden_size]
         # BART attends to LXMERT
-        H_bart_attends_to_lxmert = self.bart_to_lxmert_attention(H_context, H_lxmert)
-        
+        H_bart_attends_to_lxmert = self.bart_to_lxmert_attention(H_context, H_lxmert) # Shape: [B, lxmert_hidden_size]
+
         # 4. Gating Mechanism - Control information flow
-        lxmert_gate_values = self.lxmert_gate(torch.cat([H_lxmert, H_lxmert_attends_to_bart], dim=1))
-        bart_gate_values = self.bart_gate(torch.cat([H_context, H_bart_attends_to_lxmert], dim=1))
-        
+        # Input to lxmert_gate: [B, lxmert_hidden_size + bart_hidden_size]
+        lxmert_gate_values = self.lxmert_gate(torch.cat([H_lxmert, H_lxmert_attends_to_bart], dim=1)) # Shape: [B, bart_hidden_size]
+        # Input to bart_gate: [B, bart_hidden_size + lxmert_hidden_size]
+        bart_gate_values = self.bart_gate(torch.cat([H_context, H_bart_attends_to_lxmert], dim=1)) # Shape: [B, lxmert_hidden_size]
+
         # 5. Apply gates and enhance features
+        # Gated features have dimensions matching the cross-attended features
+        gated_lxmert_attends_to_bart = lxmert_gate_values * H_lxmert_attends_to_bart # Shape: [B, bart_hidden_size]
+        gated_bart_attends_to_lxmert = bart_gate_values * H_bart_attends_to_lxmert # Shape: [B, lxmert_hidden_size]
+
+        # Concatenate original feature with the *gated* cross-attended feature for enhancement input
         H_lxmert_enhanced_input = torch.cat([
-            H_lxmert,
-            lxmert_gate_values * H_lxmert_attends_to_bart
-        ], dim=1)
-        
+            H_lxmert,                       # Shape: [B, lxmert_hidden_size]
+            gated_lxmert_attends_to_bart    # Shape: [B, bart_hidden_size]
+        ], dim=1)                           # Shape: [B, lxmert_hidden_size + bart_hidden_size]
+
         H_bart_enhanced_input = torch.cat([
-            H_context,
-            bart_gate_values * H_bart_attends_to_lxmert
-        ], dim=1)
-        
-        # Apply enhancement layers
-        H_lxmert_enhanced = self.lxmert_enhance(H_lxmert_enhanced_input)
-        H_bart_enhanced = self.bart_enhance(H_bart_enhanced_input)
+            H_context,                      # Shape: [B, bart_hidden_size]
+            gated_bart_attends_to_lxmert    # Shape: [B, lxmert_hidden_size]
+        ], dim=1)                           # Shape: [B, bart_hidden_size + lxmert_hidden_size]
+
+        # Apply enhancement layers (output dimensions are restored to original)
+        H_lxmert_enhanced = self.lxmert_enhance(H_lxmert_enhanced_input) # Shape: [B, lxmert_hidden_size]
+        H_bart_enhanced = self.bart_enhance(H_bart_enhanced_input)     # Shape: [B, bart_hidden_size]
 
         # 6. Fuse enhanced representations
-        combined_features = torch.cat((H_lxmert_enhanced, H_bart_enhanced), dim=1)
+        combined_features = torch.cat((H_lxmert_enhanced, H_bart_enhanced), dim=1) # Shape: [B, lxmert_hidden_size + bart_hidden_size]
         fused_output = self.fusion_layer(combined_features)
 
         # 7. Classify
