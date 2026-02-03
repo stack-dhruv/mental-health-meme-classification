@@ -184,3 +184,8 @@ M3H
 
 # Ignoring  label_encoder.pkl files
 *.pkl
+# Dataset and large files
+dataset/
+anxiety_embeddings_output/
+depressive_embeddings_output/
+models/
